@@ -22,6 +22,7 @@ namespace Platform {
 TitleWidget::TitleWidget(not_null<RpWidget*> parent)
 : RpWidget(parent)
 , _st(&st::defaultWindowTitle)
+, _top(this, _st->top)
 , _minimize(this, _st->minimize)
 , _maximizeRestore(this, _st->maximize)
 , _close(this, _st->close)
@@ -52,6 +53,16 @@ void TitleWidget::setResizeEnabled(bool enabled) {
 }
 
 void TitleWidget::init() {
+	_top->setClickedCallback([=]() {
+		window()->setWindowFlags(_topState
+			? (windowFlags() | Qt::WindowStaysOnBottomHint)
+			: Qt::WindowStaysOnTopHint);
+		window()->show();
+		_topState = !_topState;
+		updateButtonsState();
+	});
+	_top->setPointerCursor(false);
+
 	_minimize->setClickedCallback([=] {
 		window()->setWindowState(
 			window()->windowState() | Qt::WindowMinimized);
@@ -104,6 +115,8 @@ void TitleWidget::updateControlsPosition() {
 		right += _maximizeRestore->width();
 	}
 	_minimize->moveToRight(right, 0);
+	_minimize->moveToRight(right, 0); right += _minimize->width();
+	_top->moveToRight(right, 0);
 }
 
 void TitleWidget::resizeEvent(QResizeEvent *e) {
@@ -159,6 +172,14 @@ void TitleWidget::updateButtonsState() {
 		? &_st->closeIconActiveOver
 		: &_st->close.iconOver;
 	_close->setIconOverride(close, closeOver);
+
+	const auto top = _activeState
+		? (_topState ? &_st->topIconActive : &_st->top2IconActive)
+		: (_topState ? &_st->top.icon : &_st->top2Icon);
+	const auto topOver = _activeState
+		? (_topState ? &_st->topIconActiveOver : &_st->top2IconActiveOver)
+		: (_topState ? &_st->top.iconOver : &_st->top2IconOver);
+	_top->setIconOverride(top, topOver);
 }
 
 HitTestResult TitleWidget::hitTest(QPoint point) const {
@@ -166,6 +187,7 @@ HitTestResult TitleWidget::hitTest(QPoint point) const {
 		|| (_minimize->geometry().contains(point))
 		|| (_maximizeRestore->geometry().contains(point))
 		|| (_close->geometry().contains(point))
+		|| (_top->geometry().contains(point))
 	) {
 		return HitTestResult::SysButton;
 	} else if (rect().contains(point)) {
