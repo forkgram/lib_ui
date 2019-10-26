@@ -24,6 +24,9 @@ void SetDevicePixelRatio(int ratio);
 [[nodiscard]] int Scale();
 void SetScale(int scale);
 
+[[nodiscard]] bool SquareUserpics();
+void SetSquareUserpics(bool value);
+
 [[nodiscard]] inline int CheckScale(int scale) {
 	return (scale == kScaleAuto)
 		? kScaleAuto

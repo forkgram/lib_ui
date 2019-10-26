@@ -156,7 +156,11 @@ QImage createCircleMask(int size, QColor bg, QColor fg) {
 		p.fillRect(0, 0, realSize, realSize, bg);
 		p.setPen(Qt::NoPen);
 		p.setBrush(fg);
-		p.drawEllipse(0, 0, realSize, realSize);
+		if (style::SquareUserpics()) {
+			p.drawRect(0, 0, realSize, realSize);
+		} else {
+			p.drawEllipse(0, 0, realSize, realSize);
+		}
 	}
 	result.setDevicePixelRatio(DevicePixelRatio());
 	return result;

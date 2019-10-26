@@ -11,6 +11,7 @@
 namespace style {
 namespace {
 
+bool SquareUserpicsValue = false;
 int DevicePixelRatioValue = 1;
 int ScaleValue = kScaleDefault;
 
@@ -32,6 +33,14 @@ void SetScale(int scale) {
 	Expects(scale != 0);
 
 	ScaleValue = scale;
+}
+
+bool SquareUserpics() {
+	return SquareUserpicsValue;
+}
+
+void SetSquareUserpics(bool value) {
+	SquareUserpicsValue = value;
 }
 
 } // namespace style
