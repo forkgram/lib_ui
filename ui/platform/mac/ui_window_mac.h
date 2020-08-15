@@ -24,15 +24,17 @@ public:
 	void setMinimumSize(QSize size) override;
 	void setFixedSize(QSize size) override;
 	void setGeometry(QRect rect) override;
+	void close() override;
 
 private:
 	class Private;
 	friend class Private;
 
+	void setupBodyTitleAreaEvents() override;
+
 	void init();
 	void toggleCustomTitle(bool visible);
 
-	const not_null<RpWidget*> _window;
 	const std::unique_ptr<Private> _private;
 	const not_null<TitleWidget*> _title;
 	const not_null<RpWidget*> _body;

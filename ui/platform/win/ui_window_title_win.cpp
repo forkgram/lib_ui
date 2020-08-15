@@ -19,49 +19,75 @@
 namespace Ui {
 namespace Platform {
 
-TitleWidget::TitleWidget(not_null<RpWidget*> parent)
-: RpWidget(parent)
-, _st(&st::defaultWindowTitle)
-, _top(this, _st->top)
-, _minimize(this, _st->minimize)
-, _maximizeRestore(this, _st->maximize)
-, _close(this, _st->close)
-, _shadow(this, st::titleShadow)
-, _maximizedState(parent->windowState() & Qt::WindowMaximized)
+TitleControls::TitleControls(
+	not_null<RpWidget*> parent,
+	const style::WindowTitle &st,
+	Fn<void(bool maximized)> maximize,
+	bool hasOnTop)
+: _st(&st)
+, _minimize(parent, _st->minimize)
+, _maximizeRestore(parent, _st->maximize)
+, _close(parent, _st->close)
+, _maximizedState(parent->windowState()
+	& (Qt::WindowMaximized | Qt::WindowFullScreen))
 , _activeState(parent->isActiveWindow()) {
-	init();
+	if (hasOnTop) {
+		_top = object_ptr<Ui::IconButton>(parent, _st->top);
+	}
+	init(std::move(maximize));
+
+	_close->paintRequest(
+	) | rpl::start_with_next([=] {
+		const auto active = window()->isActiveWindow();
+		if (_activeState != active) {
+			_activeState = active;
+			updateButtonsState();
+		}
+	}, _close->lifetime());
 }
 
-void TitleWidget::setText(const QString &text) {
-	window()->setWindowTitle(text);
-}
-
-void TitleWidget::setStyle(const style::WindowTitle &st) {
+void TitleControls::setStyle(const style::WindowTitle &st) {
 	_st = &st;
-	setGeometry(0, 0, window()->width(), _st->height);
 	updateButtonsState();
-	update();
 }
 
-not_null<RpWidget*> TitleWidget::window() const {
-	return static_cast<RpWidget*>(parentWidget());
+not_null<const style::WindowTitle*> TitleControls::st() const {
+	return _st;
 }
 
-void TitleWidget::setResizeEnabled(bool enabled) {
-	_resizeEnabled = enabled;
-	updateControlsVisibility();
+QRect TitleControls::geometry() const {
+	auto result = QRect();
+	const auto add = [&](auto &&control) {
+		if (!control->isHidden()) {
+			result = result.united(control->geometry());
+		}
+	};
+	add(_minimize);
+	add(_maximizeRestore);
+	add(_close);
+	return result;
 }
 
-void TitleWidget::init() {
-	_top->setClickedCallback([=]() {
-		window()->setWindowFlags(_topState
-			? (windowFlags() | Qt::WindowStaysOnBottomHint)
-			: Qt::WindowStaysOnTopHint);
-		window()->show();
-		_topState = !_topState;
-		updateButtonsState();
-	});
-	_top->setPointerCursor(false);
+not_null<RpWidget*> TitleControls::parent() const {
+	return static_cast<RpWidget*>(_close->parentWidget());
+}
+
+not_null<QWidget*> TitleControls::window() const {
+	return _close->window();
+}
+
+void TitleControls::init(Fn<void(bool maximized)> maximize) {
+	if (_top) {
+		_top->setClickedCallback([=]() {
+			window()->setWindowFlags(_topState
+				? (window()->windowFlags() | Qt::WindowStaysOnBottomHint)
+				: Qt::WindowStaysOnTopHint);
+			window()->show();
+			_topState = !_topState;
+			updateButtonsState();
+		});
+		_top->setPointerCursor(false);
+	}
 
 	_minimize->setClickedCallback([=] {
 		window()->setWindowState(
@@ -70,9 +96,13 @@ void TitleWidget::init() {
 	});
 	_minimize->setPointerCursor(false);
 	_maximizeRestore->setClickedCallback([=] {
-		window()->setWindowState(_maximizedState
-			? Qt::WindowNoState
-			: Qt::WindowMaximized);
+		if (maximize) {
+			maximize(!_maximizedState);
+		} else {
+			window()->setWindowState(_maximizedState
+				? Qt::WindowNoState
+				: Qt::WindowMaximized);
+		}
 		_maximizeRestore->clearState();
 	});
 	_maximizeRestore->setPointerCursor(false);
@@ -82,32 +112,32 @@ void TitleWidget::init() {
 	});
 	_close->setPointerCursor(false);
 
-	setAttribute(Qt::WA_OpaquePaintEvent);
-
-	window()->widthValue(
+	parent()->widthValue(
 	) | rpl::start_with_next([=](int width) {
-		setGeometry(0, 0, width, _st->height);
-	}, lifetime());
+		updateControlsPosition();
+	}, _close->lifetime());
 
 	window()->createWinId();
-	connect(
+	QObject::connect(
 		window()->windowHandle(),
 		&QWindow::windowStateChanged,
 		[=](Qt::WindowState state) { handleWindowStateChanged(state); });
-	_activeState = isActiveWindow();
+	_activeState = parent()->isActiveWindow();
 	updateButtonsState();
 }
 
-void TitleWidget::paintEvent(QPaintEvent *e) {
-	const auto active = isActiveWindow();
-	if (_activeState != active) {
-		_activeState = active;
-		updateButtonsState();
-	}
-	QPainter(this).fillRect(e->rect(), active ? _st->bgActive : _st->bg);
+void TitleControls::setResizeEnabled(bool enabled) {
+	_resizeEnabled = enabled;
+	updateControlsVisibility();
 }
 
-void TitleWidget::updateControlsPosition() {
+void TitleControls::raise() {
+	_minimize->raise();
+	_maximizeRestore->raise();
+	_close->raise();
+}
+
+void TitleControls::updateControlsPosition() {
 	auto right = 0;
 	_close->moveToRight(right, 0); right += _close->width();
 	_maximizeRestore->moveToRight(right, 0);
@@ -116,31 +146,30 @@ void TitleWidget::updateControlsPosition() {
 	}
 	_minimize->moveToRight(right, 0);
 	_minimize->moveToRight(right, 0); right += _minimize->width();
-	_top->moveToRight(right, 0);
+	if (_top) {
+		_top->moveToRight(right, 0);
+	}
 }
 
-void TitleWidget::resizeEvent(QResizeEvent *e) {
-	updateControlsPosition();
-	_shadow->setGeometry(0, height() - st::lineWidth, width(), st::lineWidth);
-}
-
-void TitleWidget::updateControlsVisibility() {
+void TitleControls::updateControlsVisibility() {
 	_maximizeRestore->setVisible(_resizeEnabled);
 	updateControlsPosition();
-	update();
 }
 
-void TitleWidget::handleWindowStateChanged(Qt::WindowState state) {
-	if (state == Qt::WindowMinimized) return;
+void TitleControls::handleWindowStateChanged(Qt::WindowState state) {
+	if (state == Qt::WindowMinimized) {
+		return;
+	}
 
-	auto maximized = (state == Qt::WindowMaximized);
+	auto maximized = (state == Qt::WindowMaximized)
+		|| (state == Qt::WindowFullScreen);
 	if (_maximizedState != maximized) {
 		_maximizedState = maximized;
 		updateButtonsState();
 	}
 }
 
-void TitleWidget::updateButtonsState() {
+void TitleControls::updateButtonsState() {
 	const auto minimize = _activeState
 		? &_st->minimizeIconActive
 		: &_st->minimize.icon;
@@ -173,22 +202,56 @@ void TitleWidget::updateButtonsState() {
 		: &_st->close.iconOver;
 	_close->setIconOverride(close, closeOver);
 
-	const auto top = _activeState
-		? (_topState ? &_st->topIconActive : &_st->top2IconActive)
-		: (_topState ? &_st->top.icon : &_st->top2Icon);
-	const auto topOver = _activeState
-		? (_topState ? &_st->topIconActiveOver : &_st->top2IconActiveOver)
-		: (_topState ? &_st->top.iconOver : &_st->top2IconOver);
-	_top->setIconOverride(top, topOver);
+	if (_top) {
+		const auto top = _activeState
+			? (_topState ? &_st->topIconActive : &_st->top2IconActive)
+			: (_topState ? &_st->top.icon : &_st->top2Icon);
+		const auto topOver = _activeState
+			? (_topState ? &_st->topIconActiveOver : &_st->top2IconActiveOver)
+			: (_topState ? &_st->top.iconOver : &_st->top2IconOver);
+		_top->setIconOverride(top, topOver);
+	}
+}
+
+TitleWidget::TitleWidget(not_null<RpWidget*> parent)
+: RpWidget(parent)
+, _controls(this, st::defaultWindowTitle, nullptr, true)
+, _shadow(this, st::titleShadow) {
+	setAttribute(Qt::WA_OpaquePaintEvent);
+
+	parent->widthValue(
+	) | rpl::start_with_next([=](int width) {
+		setGeometry(0, 0, width, _controls.st()->height);
+	}, lifetime());
+}
+
+void TitleWidget::setText(const QString &text) {
+	window()->setWindowTitle(text);
+}
+
+void TitleWidget::setStyle(const style::WindowTitle &st) {
+	_controls.setStyle(st);
+	setGeometry(0, 0, window()->width(), _controls.st()->height);
+	update();
+}
+
+void TitleWidget::setResizeEnabled(bool enabled) {
+	_controls.setResizeEnabled(enabled);
+}
+
+void TitleWidget::paintEvent(QPaintEvent *e) {
+	const auto active = window()->isActiveWindow();
+	QPainter(this).fillRect(
+		e->rect(),
+		active ? _controls.st()->bgActive : _controls.st()->bg);
+}
+
+void TitleWidget::resizeEvent(QResizeEvent *e) {
+	_shadow->setGeometry(0, height() - st::lineWidth, width(), st::lineWidth);
 }
 
 HitTestResult TitleWidget::hitTest(QPoint point) const {
-	if (false
-		|| (_minimize->geometry().contains(point))
-		|| (_maximizeRestore->geometry().contains(point))
-		|| (_close->geometry().contains(point))
-		|| (_top->geometry().contains(point))
-	) {
+	if (_controls.geometry().contains(point)) {
 		return HitTestResult::SysButton;
 	} else if (rect().contains(point)) {
 		return HitTestResult::Caption;

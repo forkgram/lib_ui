@@ -7,10 +7,13 @@
 #include "ui/platform/mac/ui_window_mac.h"
 
 #include "ui/platform/mac/ui_window_title_mac.h"
+#include "ui/widgets/window.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/palette.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QAbstractNativeEventFilter>
+#include <QtGui/QWindow>
 #include <QtWidgets/QOpenGLWidget>
 #include <Cocoa/Cocoa.h>
 
@@ -78,13 +81,42 @@ private:
 
 };
 
+class EventFilter : public QObject, public QAbstractNativeEventFilter {
+public:
+	EventFilter(not_null<QObject*> parent, Fn<bool(void*)> checkPerformDrag)
+	: QObject(parent)
+	, _checkPerformDrag(std::move(checkPerformDrag)) {
+		Expects(_checkPerformDrag != nullptr);
+	}
+
+	bool nativeEventFilter(
+			const QByteArray &eventType,
+			void *message,
+			long *result) {
+		NSEvent *e = static_cast<NSEvent*>(message);
+		return (e && [e type] == NSEventTypeLeftMouseDown)
+			? _checkPerformDrag([e window])
+			: false;
+		return false;
+	}
+
+private:
+	Fn<bool(void*)> _checkPerformDrag;
+
+};
+
 } // namespace
 
 class WindowHelper::Private final {
 public:
 	explicit Private(not_null<WindowHelper*> owner);
+	~Private();
 
 	[[nodiscard]] int customTitleHeight() const;
+	[[nodiscard]] QRect controlsRect() const;
+	[[nodiscard]] bool checkNativeMove(void *nswindow) const;
+	void activateBeforeNativeMove();
+	void close();
 
 private:
 	void init();
@@ -113,32 +145,85 @@ WindowHelper::Private::Private(not_null<WindowHelper*> owner)
 	init();
 }
 
+WindowHelper::Private::~Private() {
+	[_observer release];
+}
+
 int WindowHelper::Private::customTitleHeight() const {
 	return _customTitleHeight;
 }
 
-Fn<void(bool)> WindowHelper::Private::toggleCustomTitleCallback() {
-	return [=](bool visible) {
-		_owner->toggleCustomTitle(visible);
+QRect WindowHelper::Private::controlsRect() const {
+	const auto button = [&](NSWindowButton type) {
+		auto view = [_nativeWindow standardWindowButton:type];
+		if (!view) {
+			return QRect();
+		}
+		auto result = [view frame];
+		for (auto parent = [view superview]; parent != nil; parent = [parent superview]) {
+			const auto origin = [parent frame].origin;
+			result.origin.x += origin.x;
+			result.origin.y += origin.y;
+		}
+		return QRect(result.origin.x, result.origin.y, result.size.width, result.size.height);
 	};
+	auto result = QRect();
+	const auto buttons = {
+		NSWindowCloseButton,
+		NSWindowMiniaturizeButton,
+		NSWindowZoomButton,
+	};
+	for (const auto type : buttons) {
+		result = result.united(button(type));
+	}
+	return QRect(
+		result.x(),
+		[_nativeWindow frame].size.height - result.y() - result.height(),
+		result.width(),
+		result.height());
+}
+
+bool WindowHelper::Private::checkNativeMove(void *nswindow) const {
+	if (_nativeWindow != nswindow
+		|| ([_nativeWindow styleMask] & NSFullScreenWindowMask) == NSFullScreenWindowMask) {
+		return false;
+	}
+	const auto real = QPointF::fromCGPoint([NSEvent mouseLocation]);
+	const auto frame = QRectF::fromCGRect([_nativeWindow frame]);
+	const auto border = QMarginsF{ 3., 3., 3., 3. };
+	return frame.marginsRemoved(border).contains(real);
+}
+
+void WindowHelper::Private::activateBeforeNativeMove() {
+	[_nativeWindow makeKeyAndOrderFront:_nativeWindow];
+}
+
+void WindowHelper::Private::close() {
+	[_nativeWindow close];
+}
+
+Fn<void(bool)> WindowHelper::Private::toggleCustomTitleCallback() {
+	return crl::guard(_owner->window(), [=](bool visible) {
+		_owner->toggleCustomTitle(visible);
+	});
 }
 
 Fn<void()> WindowHelper::Private::enforceStyleCallback() {
-	return [=] {
+	return crl::guard(_owner->window(), [=] {
 		if (_nativeWindow && _customTitleHeight > 0) {
 			[_nativeWindow setStyleMask:[_nativeWindow styleMask] | NSFullSizeContentViewWindowMask];
 		}
-	};
+	});
 }
 
 void WindowHelper::Private::initOpenGL() {
-	auto forceOpenGL = std::make_unique<QOpenGLWidget>(_owner->_window);
+	auto forceOpenGL = std::make_unique<QOpenGLWidget>(_owner->window());
 }
 
 void WindowHelper::Private::resolveWeakPointers() {
-	_owner->_window->createWinId();
+	_owner->window()->createWinId();
 
-	_nativeView = reinterpret_cast<NSView*>(_owner->_window->winId());
+	_nativeView = reinterpret_cast<NSView*>(_owner->window()->winId());
 	_nativeWindow = _nativeView ? [_nativeView window] : nullptr;
 
 	Ensures(_nativeWindow != nullptr);
@@ -189,14 +274,17 @@ void WindowHelper::Private::init() {
 }
 
 WindowHelper::WindowHelper(not_null<RpWidget*> window)
-: _window(window)
+: BasicWindowHelper(window)
 , _private(std::make_unique<Private>(this))
 , _title(_private->customTitleHeight()
 	? Ui::CreateChild<TitleWidget>(
-		_window.get(),
+		window.get(),
 		_private->customTitleHeight())
 	: nullptr)
-, _body(Ui::CreateChild<RpWidget>(_window.get())) {
+, _body(Ui::CreateChild<RpWidget>(window.get())) {
+	if (_title->shouldBeHidden()) {
+		toggleCustomTitle(false);
+	}
 	init();
 }
 
@@ -211,44 +299,69 @@ void WindowHelper::setTitle(const QString &title) {
 	if (_title) {
 		_title->setText(title);
 	}
-	_window->setWindowTitle(
+	window()->setWindowTitle(
 		(!_title || _title->isHidden()) ? title : QString());
 }
 
 void WindowHelper::setTitleStyle(const style::WindowTitle &st) {
 	if (_title) {
 		_title->setStyle(st);
+		if (_title->shouldBeHidden()) {
+			toggleCustomTitle(false);
+		}
 	}
 }
 
 void WindowHelper::toggleCustomTitle(bool visible) {
+	if (_title->shouldBeHidden()) {
+		visible = false;
+	}
 	if (!_title || _title->isHidden() != visible) {
 		return;
 	}
 	_title->setVisible(visible);
-	_window->setWindowTitle(visible ? QString() : _title->text());
+	window()->setWindowTitle(visible ? QString() : _title->text());
 }
 
 void WindowHelper::setMinimumSize(QSize size) {
-	_window->setMinimumSize(
+	window()->setMinimumSize(
 		size.width(),
 		(_title ? _title->height() : 0) + size.height());
 }
 
 void WindowHelper::setFixedSize(QSize size) {
-	_window->setFixedSize(
+	window()->setFixedSize(
 		size.width(),
 		(_title ? _title->height() : 0) + size.height());
 }
 
 void WindowHelper::setGeometry(QRect rect) {
-	_window->setGeometry(
+	window()->setGeometry(
 		rect.marginsAdded({ 0, (_title ? _title->height() : 0), 0, 0 }));
+}
+
+void WindowHelper::setupBodyTitleAreaEvents() {
+	const auto controls = _private->controlsRect();
+	qApp->installNativeEventFilter(new EventFilter(window(), [=](void *nswindow) {
+		const auto point = body()->mapFromGlobal(QCursor::pos());
+		if (_private->checkNativeMove(nswindow)
+			&& !controls.contains(point)
+			&& (bodyTitleAreaHit(point) & WindowTitleHitTestFlag::Move)) {
+			_private->activateBeforeNativeMove();
+			window()->windowHandle()->startSystemMove();
+			return true;
+		}
+		return false;
+	}));
+}
+
+void WindowHelper::close() {
+	_private->close();
 }
 
 void WindowHelper::init() {
 	rpl::combine(
-		_window->sizeValue(),
+		window()->sizeValue(),
 		_title->heightValue(),
 		_title->shownValue()
 	) | rpl::start_with_next([=](QSize size, int titleHeight, bool shown) {
@@ -263,7 +376,7 @@ void WindowHelper::init() {
 	}, _body->lifetime());
 }
 
-std::unique_ptr<BasicWindowHelper> CreateWindowHelper(
+std::unique_ptr<BasicWindowHelper> CreateSpecialWindowHelper(
 		not_null<RpWidget*> window) {
 	return std::make_unique<WindowHelper>(window);
 }

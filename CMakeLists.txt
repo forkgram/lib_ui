@@ -4,7 +4,7 @@
 # For license and copyright information please follow this link:
 # https://github.com/desktop-app/legal/blob/master/LEGAL
 
-add_library(lib_ui OBJECT)
+add_library(lib_ui STATIC)
 add_library(desktop-app::lib_ui ALIAS lib_ui)
 init_target(lib_ui)
 
@@ -84,6 +84,7 @@ PRIVATE
     ui/platform/win/ui_window_win.h
     ui/platform/win/ui_utility_win.cpp
     ui/platform/win/ui_utility_win.h
+    ui/platform/ui_platform_window.cpp
     ui/platform/ui_platform_window.h
     ui/platform/ui_platform_utility.h
     ui/style/style_core.cpp

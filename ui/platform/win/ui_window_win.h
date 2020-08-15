@@ -27,6 +27,8 @@ public:
 	void setMinimumSize(QSize size) override;
 	void setFixedSize(QSize size) override;
 	void setGeometry(QRect rect) override;
+	void showFullScreen() override;
+	void showNormal() override;
 
 private:
 	class NativeFilter;
@@ -45,7 +47,6 @@ private:
 
 	static not_null<NativeFilter*> GetNativeFilter();
 
-	const not_null<RpWidget*> _window;
 	const HWND _handle = nullptr;
 	const not_null<TitleWidget*> _title;
 	const not_null<RpWidget*> _body;
@@ -53,6 +54,7 @@ private:
 	bool _updatingMargins = false;
 	QMargins _marginsDelta;
 	HMENU _menu = nullptr;
+	bool _isFullScreen = false;
 
 };
 
