@@ -45,12 +45,17 @@ public:
 
 	void setLayerType(bool layerType) override;
 	void setStyle(const style::Box &st) override;
+	const style::Box &style() override;
 	void setTitle(rpl::producer<TextWithEntities> title) override;
 	void setAdditionalTitle(rpl::producer<QString> additional) override;
 	void showBox(
 		object_ptr<BoxContent> box,
 		LayerOptions options,
 		anim::type animated) override;
+
+	void showFinished() override {
+		_content->showFinished();
+	}
 
 	void clearButtons() override;
 	QPointer<RoundButton> addButton(

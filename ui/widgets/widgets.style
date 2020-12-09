@@ -182,6 +182,74 @@ ScrollArea {
 	hiding: int;
 }
 
+Shadow {
+	left: icon;
+	topLeft: icon;
+	top: icon;
+	topRight: icon;
+	right: icon;
+	bottomRight: icon;
+	bottom: icon;
+	bottomLeft: icon;
+	extend: margins;
+	fallback: color;
+}
+
+PanelAnimation {
+	startWidth: double;
+	widthDuration: double;
+	startHeight: double;
+	heightDuration: double;
+	startOpacity: double;
+	opacityDuration: double;
+	startFadeTop: double;
+	fadeHeight: double;
+	fadeOpacity: double;
+	fadeBg: color;
+	shadow: Shadow;
+}
+
+Menu {
+	skip: pixels;
+
+	itemBg: color;
+	itemBgOver: color;
+	itemFg: color;
+	itemFgOver: color;
+	itemFgDisabled: color;
+	itemFgShortcut: color;
+	itemFgShortcutOver: color;
+	itemFgShortcutDisabled: color;
+	itemPadding: margins;
+	itemIconPosition: point;
+	itemStyle: TextStyle;
+	itemToggle: Toggle;
+	itemToggleOver: Toggle;
+	itemToggleShift: pixels;
+
+	separatorPadding: margins;
+	separatorWidth: pixels;
+	separatorFg: color;
+
+	arrow: icon;
+
+	widthMin: pixels;
+	widthMax: pixels;
+
+	ripple: RippleAnimation;
+}
+
+PopupMenu {
+	shadow: Shadow;
+	scrollPadding: margins;
+	animation: PanelAnimation;
+
+	menu: Menu;
+
+	duration: int;
+	showDuration: int;
+}
+
 FlatInput {
 	textColor: color;
 	bgColor: color;
@@ -231,6 +299,7 @@ InputField {
 	borderActive: pixels;
 
 	font: font;
+	menu: PopupMenu;
 
 	width: pixels;
 	heightMin: pixels;
@@ -263,19 +332,6 @@ IconButton {
 	rippleAreaPosition: point;
 	rippleAreaSize: pixels;
 	ripple: RippleAnimation;
-}
-
-Shadow {
-	left: icon;
-	topLeft: icon;
-	top: icon;
-	topRight: icon;
-	right: icon;
-	bottomRight: icon;
-	bottom: icon;
-	bottomLeft: icon;
-	extend: margins;
-	fallback: color;
 }
 
 MediaSlider {
@@ -344,6 +400,14 @@ CrossButton {
 	ripple: RippleAnimation;
 }
 
+CrossLineAnimation {
+	fg: color;
+	icon: icon;
+	startPosition: point;
+	endPosition: point;
+	stroke: pixels;
+}
+
 MultiSelectItem {
 	padding: margins;
 	maxWidth: pixels;
@@ -379,65 +443,12 @@ MultiSelect {
 CallButton {
 	button: IconButton;
 	bg: color;
+	bgSize: pixels;
+	bgPosition: point;
 	angle: double;
 	outerRadius: pixels;
 	outerBg: color;
 	label: FlatLabel;
-}
-
-Menu {
-	skip: pixels;
-
-	itemBg: color;
-	itemBgOver: color;
-	itemFg: color;
-	itemFgOver: color;
-	itemFgDisabled: color;
-	itemFgShortcut: color;
-	itemFgShortcutOver: color;
-	itemFgShortcutDisabled: color;
-	itemPadding: margins;
-	itemIconPosition: point;
-	itemStyle: TextStyle;
-	itemToggle: Toggle;
-	itemToggleOver: Toggle;
-	itemToggleShift: pixels;
-
-	separatorPadding: margins;
-	separatorWidth: pixels;
-	separatorFg: color;
-
-	arrow: icon;
-
-	widthMin: pixels;
-	widthMax: pixels;
-
-	ripple: RippleAnimation;
-}
-
-PanelAnimation {
-	startWidth: double;
-	widthDuration: double;
-	startHeight: double;
-	heightDuration: double;
-	startOpacity: double;
-	opacityDuration: double;
-	startFadeTop: double;
-	fadeHeight: double;
-	fadeOpacity: double;
-	fadeBg: color;
-	shadow: Shadow;
-}
-
-PopupMenu {
-	shadow: Shadow;
-	scrollPadding: margins;
-	animation: PanelAnimation;
-
-	menu: Menu;
-
-	duration: int;
-	showDuration: int;
 }
 
 InnerDropdown {
@@ -493,6 +504,7 @@ SettingsButton {
 	textBgOver: color;
 
 	font: font;
+	rightLabel: FlatLabel;
 
 	height: pixels;
 	padding: margins;
@@ -621,6 +633,8 @@ defaultRippleAnimation: RippleAnimation {
 emptyRippleAnimation: RippleAnimation {
 }
 
+buttonRadius: 4px;
+
 defaultActiveButton: RoundButton {
 	textFg: activeButtonFg;
 	textFgOver: activeButtonFgOver;
@@ -716,35 +730,6 @@ defaultFlatInput: FlatInput {
 	phDuration: 100;
 }
 
-defaultInputField: InputField {
-	textBg: windowBg;
-	textFg: windowFg;
-	textMargins: margins(0px, 26px, 0px, 4px);
-	textAlign: align(topleft);
-
-	placeholderFg: windowSubTextFg;
-	placeholderFgActive: windowActiveTextFg;
-	placeholderFgError: attentionButtonFg;
-	placeholderMargins: margins(0px, 0px, 0px, 0px);
-	placeholderAlign: align(topleft);
-	placeholderScale: 0.9;
-	placeholderShift: -20px;
-	placeholderFont: font(semibold 14px);
-	duration: 150;
-
-	borderFg: inputBorderFg;
-	borderFgActive: activeLineFg;
-	borderFgError: activeLineFgError;
-
-	border: 1px;
-	borderActive: 2px;
-
-	font: boxTextFont;
-
-	heightMin: 52px;
-	heightMax: 148px;
-}
-
 defaultCheckboxIcon: icon {{ "default_checkbox_check", overviewCheckFgActive, point(4px, 7px) }};
 
 defaultCheck: Check {
@@ -785,6 +770,7 @@ defaultToggle: Toggle {
 }
 defaultCheckbox: Checkbox {
 	textFg: windowFg;
+	textFgActive: windowFg;
 
 	width: -44px;
 	margin: margins(8px, 8px, 8px, 8px);
@@ -800,83 +786,6 @@ defaultCheckbox: Checkbox {
 	ripple: defaultRippleAnimation;
 
 	disabledOpacity: 0.5;
-}
-
-defaultIconButton: IconButton {
-	iconPosition: point(-1px, -1px);
-}
-
-defaultMultiSelectItem: MultiSelectItem {
-	padding: margins(6px, 7px, 12px, 0px);
-	maxWidth: 128px;
-	height: 32px;
-	style: defaultTextStyle;
-	textBg: contactsBgOver;
-	textFg: windowFg;
-	textActiveBg: activeButtonBg;
-	textActiveFg: activeButtonFg;
-	deleteFg: activeButtonFg;
-	deleteCross: CrossAnimation {
-		size: 32px;
-		skip: 10px;
-		stroke: 2px;
-		minScale: 0.3;
-	}
-	duration: 150;
-	minScale: 0.3;
-}
-
-widgetSlideDuration: 200;
-widgetFadeDuration: 200;
-
-fieldSearchIcon: icon {{ "box_search", menuIconFg, point(9px, 8px) }};
-boxFieldSearchIcon: icon {{ "box_search", menuIconFg, point(10px, 9px) }};
-
-SettingsSlider {
-	height: pixels;
-	barTop: pixels;
-	barSkip: pixels;
-	barStroke: pixels;
-	barFg: color;
-	barFgActive: color;
-	labelTop: pixels;
-	labelStyle: TextStyle;
-	labelFg: color;
-	labelFgActive: color;
-	duration: int;
-	rippleBottomSkip: pixels;
-	rippleBg: color;
-	rippleBgActive: color;
-	ripple: RippleAnimation;
-}
-
-defaultSettingsSlider: SettingsSlider {
-	height: 39px;
-	barTop: 5px;
-	barSkip: 3px;
-	barStroke: 3px;
-	barFg: sliderBgInactive;
-	barFgActive: sliderBgActive;
-	labelTop: 17px;
-	labelStyle: defaultTextStyle;
-	labelFg: windowActiveTextFg;
-	labelFgActive: windowActiveTextFg;
-	duration: 150;
-}
-
-defaultTabsSlider: SettingsSlider(defaultSettingsSlider) {
-	height: 53px;
-	barTop: 50px;
-	barSkip: 0px;
-	barFg: transparent;
-	labelTop: 19px;
-	labelStyle: semiboldTextStyle;
-	labelFg: windowSubTextFg;
-	labelFgActive: lightButtonFg;
-	rippleBottomSkip: 1px;
-	rippleBg: windowBgOver;
-	rippleBgActive: lightButtonBgOver;
-	ripple: defaultRippleAnimation;
 }
 
 defaultRoundShadow: Shadow {
@@ -907,48 +816,6 @@ defaultPanelAnimation: PanelAnimation {
 	fadeOpacity: 1.0;
 	fadeBg: menuBg;
 	shadow: defaultRoundShadow;
-}
-
-defaultContinuousSlider: MediaSlider {
-	width: 3px;
-	activeFg: mediaPlayerActiveFg;
-	inactiveFg: mediaPlayerInactiveFg;
-	activeFgOver: mediaPlayerActiveFg;
-	inactiveFgOver: mediaPlayerInactiveFg;
-	activeFgDisabled: mediaPlayerInactiveFg;
-	inactiveFgDisabled: windowBg;
-	receivedTillFg: mediaPlayerInactiveFg;
-	seekSize: size(9px, 9px);
-	duration: 150;
-}
-
-defaultRoundCheckbox: RoundCheckbox {
-	border: windowBg;
-	bgActive: windowBgActive;
-	width: 2px;
-	duration: 160;
-	bgDuration: 0.75;
-	fgDuration: 1.;
-}
-defaultPeerListCheckIcon: icon {{
-	"default_checkbox_check",
-	overviewCheckFgActive,
-	point(3px, 6px)
-}};
-defaultPeerListCheck: RoundCheckbox(defaultRoundCheckbox) {
-	size: 20px;
-	sizeSmall: 0.3;
-	bgInactive: overviewCheckBg;
-	bgActive: overviewCheckBgActive;
-	check: defaultPeerListCheckIcon;
-}
-defaultPeerListCheckbox: RoundImageCheckbox {
-	imageRadius: 21px;
-	imageSmallRadius: 18px;
-	selectWidth: 2px;
-	selectFg: windowBgActive;
-	selectDuration: 150;
-	check: defaultPeerListCheck;
 }
 
 defaultMenuArrow: icon {{ "dropdown_submenu_arrow", menuSubmenuArrowFg }};
@@ -998,6 +865,220 @@ defaultPopupMenu: PopupMenu {
 	duration: 150;
 	showDuration: 200;
 }
+
+defaultInputField: InputField {
+	textBg: windowBg;
+	textFg: windowFg;
+	textMargins: margins(0px, 26px, 0px, 4px);
+	textAlign: align(topleft);
+
+	placeholderFg: windowSubTextFg;
+	placeholderFgActive: windowActiveTextFg;
+	placeholderFgError: attentionButtonFg;
+	placeholderMargins: margins(0px, 0px, 0px, 0px);
+	placeholderAlign: align(topleft);
+	placeholderScale: 0.9;
+	placeholderShift: -20px;
+	placeholderFont: font(semibold 14px);
+	duration: 150;
+
+	borderFg: inputBorderFg;
+	borderFgActive: activeLineFg;
+	borderFgError: activeLineFgError;
+
+	border: 1px;
+	borderActive: 2px;
+
+	font: boxTextFont;
+	menu: defaultPopupMenu;
+
+	heightMin: 52px;
+	heightMax: 148px;
+}
+
+defaultIconButton: IconButton {
+	iconPosition: point(-1px, -1px);
+}
+
+defaultMultiSelectItem: MultiSelectItem {
+	padding: margins(6px, 7px, 12px, 0px);
+	maxWidth: 128px;
+	height: 32px;
+	style: defaultTextStyle;
+	textBg: contactsBgOver;
+	textFg: windowFg;
+	textActiveBg: activeButtonBg;
+	textActiveFg: activeButtonFg;
+	deleteFg: activeButtonFg;
+	deleteCross: CrossAnimation {
+		size: 32px;
+		skip: 10px;
+		stroke: 2px;
+		minScale: 0.3;
+	}
+	duration: 150;
+	minScale: 0.3;
+}
+
+defaultMultiSelectSearchField: InputField(defaultInputField) {
+	textBg: transparent;
+	textMargins: margins(2px, 7px, 2px, 0px);
+
+	placeholderFg: placeholderFg;
+	placeholderFgActive: placeholderFgActive;
+	placeholderFgError: placeholderFgActive;
+	placeholderMargins: margins(2px, 0px, 2px, 0px);
+	placeholderScale: 0.;
+	placeholderFont: normalFont;
+
+	border: 0px;
+	borderActive: 0px;
+
+	heightMin: 32px;
+
+	font: normalFont;
+}
+
+fieldSearchIcon: icon {{ "box_search", menuIconFg, point(9px, 8px) }};
+boxFieldSearchIcon: icon {{ "box_search", menuIconFg, point(10px, 9px) }};
+
+defaultMultiSelectSearchCancel: CrossButton {
+	width: 44px;
+	height: 44px;
+
+	cross: CrossAnimation {
+		size: 36px;
+		skip: 12px;
+		stroke: 2px;
+		minScale: 0.3;
+	}
+	crossFg: boxTitleCloseFg;
+	crossFgOver: boxTitleCloseFgOver;
+	crossPosition: point(4px, 4px);
+
+	duration: 150;
+	loadingPeriod: 1000;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgOver;
+	}
+}
+defaultMultiSelect: MultiSelect {
+	bg: boxSearchBg;
+	padding: margins(8px, 6px, 8px, 6px);
+	maxHeight: 104px;
+	scroll: ScrollArea(defaultSolidScroll) {
+		deltat: 3px;
+		deltab: 3px;
+		round: 1px;
+		width: 8px;
+		deltax: 3px;
+		hiding: 1000;
+	}
+
+	item: defaultMultiSelectItem;
+	itemSkip: 8px;
+
+	field: defaultMultiSelectSearchField;
+	fieldMinWidth: 42px;
+	fieldIcon: boxFieldSearchIcon;
+	fieldIconSkip: 36px;
+
+	fieldCancel: defaultMultiSelectSearchCancel;
+	fieldCancelSkip: 40px;
+}
+
+widgetSlideDuration: 200;
+widgetFadeDuration: 200;
+
+SettingsSlider {
+	height: pixels;
+	barTop: pixels;
+	barSkip: pixels;
+	barStroke: pixels;
+	barFg: color;
+	barFgActive: color;
+	labelTop: pixels;
+	labelStyle: TextStyle;
+	labelFg: color;
+	labelFgActive: color;
+	duration: int;
+	rippleBottomSkip: pixels;
+	rippleBg: color;
+	rippleBgActive: color;
+	ripple: RippleAnimation;
+}
+
+defaultSettingsSlider: SettingsSlider {
+	height: 39px;
+	barTop: 5px;
+	barSkip: 3px;
+	barStroke: 3px;
+	barFg: sliderBgInactive;
+	barFgActive: sliderBgActive;
+	labelTop: 17px;
+	labelStyle: defaultTextStyle;
+	labelFg: windowActiveTextFg;
+	labelFgActive: windowActiveTextFg;
+	duration: 150;
+}
+
+defaultTabsSlider: SettingsSlider(defaultSettingsSlider) {
+	height: 53px;
+	barTop: 50px;
+	barSkip: 0px;
+	barFg: transparent;
+	labelTop: 19px;
+	labelStyle: semiboldTextStyle;
+	labelFg: windowSubTextFg;
+	labelFgActive: lightButtonFg;
+	rippleBottomSkip: 1px;
+	rippleBg: windowBgOver;
+	rippleBgActive: lightButtonBgOver;
+	ripple: defaultRippleAnimation;
+}
+
+defaultContinuousSlider: MediaSlider {
+	width: 3px;
+	activeFg: mediaPlayerActiveFg;
+	inactiveFg: mediaPlayerInactiveFg;
+	activeFgOver: mediaPlayerActiveFg;
+	inactiveFgOver: mediaPlayerInactiveFg;
+	activeFgDisabled: mediaPlayerInactiveFg;
+	inactiveFgDisabled: windowBg;
+	receivedTillFg: mediaPlayerInactiveFg;
+	seekSize: size(9px, 9px);
+	duration: 150;
+}
+
+defaultRoundCheckbox: RoundCheckbox {
+	border: windowBg;
+	bgActive: windowBgActive;
+	width: 2px;
+	duration: 160;
+	bgDuration: 0.75;
+	fgDuration: 1.;
+}
+defaultPeerListCheckIcon: icon {{
+	"default_checkbox_check",
+	overviewCheckFgActive,
+	point(3px, 6px)
+}};
+defaultPeerListCheck: RoundCheckbox(defaultRoundCheckbox) {
+	size: 20px;
+	sizeSmall: 0.3;
+	bgInactive: overviewCheckBg;
+	bgActive: overviewCheckBgActive;
+	check: defaultPeerListCheckIcon;
+}
+defaultPeerListCheckbox: RoundImageCheckbox {
+	imageRadius: 21px;
+	imageSmallRadius: 18px;
+	selectWidth: 2px;
+	selectFg: windowBgActive;
+	selectDuration: 150;
+	check: defaultPeerListCheck;
+}
+
 defaultInnerDropdown: InnerDropdown {
 	padding: margins(10px, 10px, 10px, 10px);
 	shadow: defaultRoundShadow;
@@ -1122,12 +1203,15 @@ PeerListItem {
 	photoPosition: point;
 	namePosition: point;
 	nameStyle: TextStyle;
+	nameFg: color;
+	nameFgChecked: color;
 	statusPosition: point;
 	photoSize: pixels;
 	maximalWidth: pixels;
 
 	button: OutlineButton;
 	checkbox: RoundImageCheckbox;
+	disabledCheckFg: color;
 	statusFg: color;
 	statusFgOver: color;
 	statusFgActive: color;
@@ -1135,6 +1219,8 @@ PeerListItem {
 
 PeerList {
 	padding: margins;
+	bg: color;
+	about: FlatLabel;
 	item: PeerListItem;
 }
 
@@ -1160,17 +1246,37 @@ defaultPeerListItem: PeerListItem {
 		linkFont: semiboldFont;
 		linkFontOver: semiboldFont;
 	}
+	nameFg: contactsNameFg;
+	nameFgChecked: windowActiveTextFg;
 	statusPosition: point(68px, 31px);
 	photoSize: 46px;
 	button: defaultPeerListButton;
 	checkbox: defaultPeerListCheckbox;
+	disabledCheckFg: menuIconFg;
 	statusFg: windowSubTextFg;
 	statusFgOver: windowSubTextFgOver;
 	statusFgActive: windowActiveTextFg;
 }
 
+boxTextStyle: TextStyle(defaultTextStyle) {
+	font: font(boxFontSize);
+	linkFont: font(boxFontSize);
+	linkFontOver: font(boxFontSize underline);
+}
+
+defaultPeerListAbout: FlatLabel(defaultFlatLabel) {
+	minWidth: 240px;
+	textFg: membersAboutLimitFg;
+	align: align(top);
+	style: TextStyle(boxTextStyle) {
+		lineHeight: 22px;
+	}
+}
+
 defaultPeerList: PeerList {
 	padding: margins(0px, 0px, 0px, 0px);
+	bg: contactsBg;
+	about: defaultPeerListAbout;
 	item: defaultPeerListItem;
 }
 
@@ -1257,6 +1363,11 @@ defaultSettingsToggle: Toggle(defaultToggle) {
 defaultSettingsToggleOver: Toggle(defaultSettingsToggle) {
 	untoggledFg: menuIconFgOver;
 }
+defaultSettingsRightLabel: FlatLabel(defaultFlatLabel) {
+	textFg: windowActiveTextFg;
+	style: boxTextStyle;
+	maxHeight: 20px;
+}
 defaultSettingsButton: SettingsButton {
 	textFg: windowBoldFg;
 	textFgOver: windowBoldFgOver;
@@ -1264,6 +1375,7 @@ defaultSettingsButton: SettingsButton {
 	textBgOver: windowBgOver;
 
 	font: boxTextFont;
+	rightLabel: defaultSettingsRightLabel;
 
 	height: 20px;
 	padding: margins(22px, 10px, 22px, 8px);
@@ -1300,6 +1412,67 @@ defaultToast: Toast {
 	durationFadeIn: 200;
 	durationFadeOut: 1000;
 	durationSlide: 160;
+}
+
+callMuteMainBlobMinRadius: 57px;
+callMuteMainBlobMaxRadius: 63px;
+callMuteMinorBlobMinRadius: 62px;
+callMuteMinorBlobMaxRadius: 72px;
+callMuteMajorBlobMinRadius: 65px;
+callMuteMajorBlobMaxRadius: 75px;
+
+callMuteButtonActiveIcon: icon {{ "calls/voice_unmuted_large", groupCallIconFg }};
+callMuteButtonActiveInner: IconButton {
+	width: 136px;
+	height: 151px;
+
+	iconPosition: point(-1px, 50px);
+	icon: callMuteButtonActiveIcon;
+}
+callMuteButtonLabel: FlatLabel(defaultFlatLabel) {
+	textFg: callNameFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(13px);
+		linkFont: font(13px);
+		linkFontOver: font(13px underline);
+	}
+}
+callMuteButtonActive: CallButton {
+	button: callMuteButtonActiveInner;
+	bg: groupCallLive1;
+	bgSize: 100px;
+	bgPosition: point(18px, 18px);
+	outerRadius: 18px;
+	outerBg: callAnswerBgOuter;
+	label: callMuteButtonLabel;
+}
+callMuteButtonMuted: CallButton(callMuteButtonActive) {
+	button: IconButton(callMuteButtonActiveInner) {
+		icon: icon {{ "calls/voice_muted_large", groupCallIconFg }};
+	}
+	bg: groupCallMuted1;
+	label: callMuteButtonLabel;
+}
+callMuteButtonConnecting: CallButton(callMuteButtonMuted) {
+	button: IconButton(callMuteButtonActiveInner) {
+		icon: icon {{ "calls/voice_muted_large", groupCallIconFg }};
+	}
+	bg: callIconBg;
+	label: callMuteButtonLabel;
+}
+
+callMuteCrossLine: CrossLineAnimation {
+	fg: groupCallIconFg;
+	icon: callMuteButtonActiveIcon;
+	startPosition: point(7px, 2px);
+	endPosition: point(34px, 30px);
+	stroke: 4px;
+}
+
+callConnectingRadial: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
+	color: lightButtonFg;
+	thickness: 4px;
+	size: size(100px, 100px);
 }
 
 // Windows specific title

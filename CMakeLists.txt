@@ -42,8 +42,11 @@ PRIVATE
     ui/effects/animations.h
     ui/effects/cross_animation.cpp
     ui/effects/cross_animation.h
+    ui/effects/cross_line.cpp
+    ui/effects/cross_line.h
     ui/effects/fade_animation.cpp
     ui/effects/fade_animation.h
+    ui/effects/gradient.h
     ui/effects/numbers_animation.cpp
     ui/effects/numbers_animation.h
     ui/effects/panel_animation.cpp
@@ -66,6 +69,14 @@ PRIVATE
     ui/layers/layer_manager.h
     ui/layers/layer_widget.cpp
     ui/layers/layer_widget.h
+    ui/paint/blob.cpp
+    ui/paint/blob.h
+    ui/paint/blob_linear.cpp
+    ui/paint/blob_linear.h
+    ui/paint/blobs.cpp
+    ui/paint/blobs.h
+    ui/paint/blobs_linear.cpp
+    ui/paint/blobs_linear.h
     ui/platform/linux/ui_window_linux.cpp
     ui/platform/linux/ui_window_linux.h
     ui/platform/linux/ui_utility_linux.cpp
@@ -123,6 +134,10 @@ PRIVATE
     ui/widgets/box_content_divider.h
     ui/widgets/buttons.cpp
     ui/widgets/buttons.h
+    ui/widgets/call_button.cpp
+    ui/widgets/call_button.h
+    ui/widgets/call_mute_button.cpp
+    ui/widgets/call_mute_button.h
     ui/widgets/checkbox.cpp
     ui/widgets/checkbox.h
     ui/widgets/dropdown_menu.cpp
@@ -187,6 +202,9 @@ PRIVATE
     ui/ui_log.h
     ui/ui_utility.cpp
     ui/ui_utility.h
+
+    ui/ui_pch.h
+
     emoji_suggestions/emoji_suggestions.cpp
     emoji_suggestions/emoji_suggestions.h
     emoji_suggestions/emoji_suggestions_helper.h

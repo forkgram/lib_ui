@@ -1046,7 +1046,7 @@ void FlatInput::paintEvent(QPaintEvent *e) {
 	p.setBrush(anim::brush(_st.bgColor, _st.bgActive, placeholderFocused));
 	{
 		PainterHighQualityEnabler hq(p);
-		p.drawRoundedRect(QRectF(0, 0, width(), height()).marginsRemoved(QMarginsF(_st.borderWidth / 2., _st.borderWidth / 2., _st.borderWidth / 2., _st.borderWidth / 2.)), st::buttonRadius - (_st.borderWidth / 2.), st::buttonRadius - (_st.borderWidth / 2.));
+		p.drawRoundedRect(QRectF(0, 0, width(), height()).marginsRemoved(QMarginsF(_st.borderWidth / 2., _st.borderWidth / 2., _st.borderWidth / 2., _st.borderWidth / 2.)), st::roundRadiusSmall - (_st.borderWidth / 2.), st::roundRadiusSmall - (_st.borderWidth / 2.));
 	}
 
 	if (!_st.icon.empty()) {
@@ -3342,7 +3342,7 @@ bool InputField::revertFormatReplace() {
 void InputField::contextMenuEventInner(QContextMenuEvent *e, QMenu *m) {
 	if (const auto menu = m ? m : _inner->createStandardContextMenu()) {
 		addMarkdownActions(menu, e);
-		_contextMenu = base::make_unique_q<PopupMenu>(this, menu);
+		_contextMenu = base::make_unique_q<PopupMenu>(this, menu, _st.menu);
 		_contextMenu->popup(e->globalPos());
 	}
 }
