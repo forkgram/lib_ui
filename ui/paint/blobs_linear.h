@@ -7,7 +7,7 @@
 #pragma once
 
 #include "ui/effects/animation_value.h"
-#include "ui/paint/blob_linear.h"
+#include "ui/paint/blob.h"
 
 class Painter;
 
@@ -17,32 +17,26 @@ class LinearBlobs final {
 public:
 	struct BlobData {
 		int segmentsCount = 0;
-		float minScale = 0;
 		float minRadius = 0;
 		float maxRadius = 0;
+		float idleRadius = 0;
 		float speedScale = 0;
 		float alpha = 0;
-		int topOffset = 0;
 	};
 
 	LinearBlobs(
 		std::vector<BlobData> blobDatas,
 		float levelDuration,
-		float levelDuration2,
-		float maxLevel);
+		float maxLevel,
+		LinearBlob::Direction direction);
 
 	void setRadiusesAt(
-		rpl::producer<LinearBlobBezier::Radiuses> &&radiuses,
+		rpl::producer<Blob::Radiuses> &&radiuses,
 		int index);
-	LinearBlobBezier::Radiuses radiusesAt(int index);
+	Blob::Radiuses radiusesAt(int index);
 
 	void setLevel(float value);
-	void paint(
-		Painter &p,
-		const QBrush &brush,
-		const QRect &rect,
-		float pinnedTop,
-		float progressToPinned);
+	void paint(Painter &p, const QBrush &brush, int width);
 	void updateLevel(crl::time dt);
 
 	[[nodiscard]] float maxRadius() const;
@@ -55,12 +49,12 @@ private:
 	void init();
 
 	const float _maxLevel;
+	const LinearBlob::Direction _direction;
 
 	std::vector<BlobData> _blobDatas;
-	std::vector<LinearBlobBezier> _blobs;
+	std::vector<LinearBlob> _blobs;
 
 	anim::continuous_value _levelValue;
-	anim::continuous_value _levelValue2;
 
 	rpl::lifetime _lifetime;
 

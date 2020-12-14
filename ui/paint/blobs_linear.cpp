@@ -13,29 +13,29 @@ namespace Ui::Paint {
 LinearBlobs::LinearBlobs(
 	std::vector<BlobData> blobDatas,
 	float levelDuration,
-	float levelDuration2,
-	float maxLevel)
+	float maxLevel,
+	LinearBlob::Direction direction)
 : _maxLevel(maxLevel)
+, _direction(direction)
 , _blobDatas(std::move(blobDatas))
-, _levelValue(levelDuration)
-, _levelValue2(levelDuration2) {
+, _levelValue(levelDuration) {
 	init();
 }
 
 void LinearBlobs::init() {
 	for (const auto &data : _blobDatas) {
-		auto blob = Paint::LinearBlobBezier(
+		auto blob = Paint::LinearBlob(
 			data.segmentsCount,
-			data.minScale);
-		blob.setRadiuses({ 0, data.minRadius });
+			_direction);
+		blob.setRadiuses({ data.minRadius, data.idleRadius });
 		blob.generateBlob();
 		_blobs.push_back(std::move(blob));
 	}
 }
 
 float LinearBlobs::maxRadius() const {
-	const auto maxOfRadiuses = [](const BlobData data) {
-		return std::max(data.maxRadius, data.minRadius);
+	const auto maxOfRadiuses = [](const BlobData &d) {
+		return std::max(d.idleRadius, std::max(d.maxRadius, d.minRadius));
 	};
 	const auto max = *ranges::max_element(
 		_blobDatas,
@@ -49,17 +49,17 @@ int LinearBlobs::size() const {
 }
 
 void LinearBlobs::setRadiusesAt(
-		rpl::producer<LinearBlobBezier::Radiuses> &&radiuses,
+		rpl::producer<Blob::Radiuses> &&radiuses,
 		int index) {
 	Expects(index >= 0 && index < size());
 	std::move(
 		radiuses
-	) | rpl::start_with_next([=](LinearBlobBezier::Radiuses r) {
+	) | rpl::start_with_next([=](Blob::Radiuses r) {
 		_blobs[index].setRadiuses(std::move(r));
 	}, _lifetime);
 }
 
-LinearBlobBezier::Radiuses LinearBlobs::radiusesAt(int index) {
+Blob::Radiuses LinearBlobs::radiusesAt(int index) {
 	Expects(index >= 0 && index < size());
 	return _blobs[index].radiuses();
 }
@@ -67,27 +67,18 @@ LinearBlobBezier::Radiuses LinearBlobs::radiusesAt(int index) {
 void LinearBlobs::setLevel(float value) {
 	const auto to = std::min(_maxLevel, value) / _maxLevel;
 	_levelValue.start(to);
-	_levelValue2.start(to);
 }
 
-void LinearBlobs::paint(
-		Painter &p,
-		const QBrush &brush,
-		const QRect &rect,
-		float pinnedTop,
-		float progressToPinned) {
+void LinearBlobs::paint(Painter &p, const QBrush &brush, int width) {
 	PainterHighQualityEnabler hq(p);
 	const auto opacity = p.opacity();
 	for (auto i = 0; i < _blobs.size(); i++) {
-		auto r = rect;
-		r.setTop(r.top() - _blobDatas[i].topOffset * _levelValue2.current());
-
 		_blobs[i].update(_levelValue.current(), _blobDatas[i].speedScale);
 		const auto alpha = _blobDatas[i].alpha;
 		if (alpha != 1.) {
 			p.setOpacity(opacity * alpha);
 		}
-		_blobs[i].paint(p, brush, r, pinnedTop, progressToPinned);
+		_blobs[i].paint(p, brush, width);
 		if (alpha != 1.) {
 			p.setOpacity(opacity);
 		}
@@ -97,13 +88,13 @@ void LinearBlobs::paint(
 void LinearBlobs::updateLevel(crl::time dt) {
 	const auto d = (dt > 20) ? 17 : dt;
 	_levelValue.update(d);
-	_levelValue2.update(d);
 
+	const auto level = (float)currentLevel();
 	for (auto i = 0; i < _blobs.size(); i++) {
 		const auto &data = _blobDatas[i];
 		_blobs[i].setRadiuses({
-			0,
-			data.minRadius + data.maxRadius * (float)currentLevel() });
+			data.minRadius,
+			data.idleRadius + (data.maxRadius - data.idleRadius) * level });
 	}
 }
 

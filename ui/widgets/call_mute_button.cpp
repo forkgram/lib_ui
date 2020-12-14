@@ -6,12 +6,14 @@
 //
 #include "ui/widgets/call_mute_button.h"
 
-#include "base/event_filter.h"
 #include "base/flat_map.h"
+#include "ui/abstract_button.h"
 #include "ui/effects/gradient.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/paint/blobs.h"
 #include "ui/painter.h"
+#include "ui/widgets/call_button.h"
+#include "ui/widgets/labels.h"
 
 #include "styles/palette.h"
 #include "styles/style_widgets.h"
@@ -20,7 +22,7 @@ namespace Ui {
 
 namespace {
 
-using Radiuses = Paint::BlobBezier::Radiuses;
+using Radiuses = Paint::Blob::Radiuses;
 
 constexpr auto kMaxLevel = 1.;
 
@@ -46,8 +48,8 @@ constexpr auto kOverrideColorRippleAlpha = 50;
 
 constexpr auto kSwitchStateDuration = 120;
 
-auto MuteBlobs() -> std::array<Paint::Blobs::BlobData, 3> {
-	return {{
+auto MuteBlobs() {
+	return std::vector<Paint::Blobs::BlobData>{
 		{
 			.segmentsCount = 6,
 			.minScale = 1.,
@@ -82,7 +84,7 @@ auto MuteBlobs() -> std::array<Paint::Blobs::BlobData, 3> {
 			.speedScale = 1.,
 			.alpha = (76. / 255.),
 		},
-	}};
+	};
 }
 
 auto Colors() {
@@ -90,7 +92,7 @@ auto Colors() {
 	return base::flat_map<CallMuteButtonType, Vector>{
 		{
 			CallMuteButtonType::ForceMuted,
-			Vector{ st::callIconBg->c, st::callIconBg->c }
+			Vector{ st::groupCallForceMuted1->c, st::groupCallForceMuted2->c }
 		},
 		{
 			CallMuteButtonType::Active,
@@ -105,10 +107,6 @@ auto Colors() {
 			Vector{ st::groupCallMuted1->c, st::groupCallMuted2->c }
 		},
 	};
-}
-
-inline float64 InterpolateF(int a, int b, float64 b_ratio) {
-	return a + float64(b - a) * b_ratio;
 }
 
 bool IsMuted(CallMuteButtonType type) {
@@ -135,7 +133,7 @@ public:
 	void setBlobBrush(QBrush brush);
 	void setGlowBrush(QBrush brush);
 
-	[[nodiscard]] QRect innerRect() const;
+	[[nodiscard]] QRectF innerRect() const;
 
 private:
 	void init();
@@ -145,7 +143,7 @@ private:
 	QBrush _blobBrush;
 	QBrush _glowBrush;
 	int _center = 0;
-	QRect _inner;
+	QRectF _inner;
 
 	crl::time _blobsLastTime = 0;
 	crl::time _blobsHideLastTime = 0;
@@ -158,7 +156,7 @@ BlobsWidget::BlobsWidget(
 	not_null<RpWidget*> parent,
 	rpl::producer<bool> &&hideBlobs)
 : RpWidget(parent)
-, _blobs(MuteBlobs() | ranges::to_vector, kLevelDuration, kMaxLevel)
+, _blobs(MuteBlobs(), kLevelDuration, kMaxLevel)
 , _blobBrush(Qt::transparent)
 , _glowBrush(Qt::transparent)
 , _blobsLastTime(crl::now()) {
@@ -202,9 +200,9 @@ void BlobsWidget::init() {
 	) | rpl::start_with_next([=](QSize size) {
 		_center = size.width() / 2;
 
-		const auto w = _blobs.maxRadius() * 2;
-		const auto margins = style::margins(w, w, w, w);
-		_inner = QRect(QPoint(), size).marginsRemoved(margins);
+		const auto w = (size.width() - _blobs.maxRadius() * 2) / 2.;
+		const auto margins = QMarginsF(w, w, w, w);
+		_inner = QRectF(QPoint(), size).marginsRemoved(margins);
 	}, lifetime());
 
 	paintRequest(
@@ -248,7 +246,7 @@ void BlobsWidget::init() {
 	}, lifetime());
 }
 
-QRect BlobsWidget::innerRect() const {
+QRectF BlobsWidget::innerRect() const {
 	return _inner;
 }
 
@@ -278,6 +276,7 @@ CallMuteButton::CallMuteButton(
 	rpl::producer<bool> &&hideBlobs,
 	CallMuteButtonState initial)
 : _state(initial)
+, _st(st::callMuteButtonActive)
 , _blobs(base::make_unique_q<BlobsWidget>(
 	parent,
 	rpl::combine(
@@ -285,30 +284,45 @@ CallMuteButton::CallMuteButton(
 		std::move(hideBlobs),
 		_state.value(
 		) | rpl::map([](const CallMuteButtonState &state) {
-			return IsConnecting(state.type);
+			return IsInactive(state.type);
 		})
-	) | rpl::map([](bool animDisabled, bool hide, bool isConnecting) {
-		return isConnecting || !(!animDisabled && !hide);
+	) | rpl::map([](bool animDisabled, bool hide, bool isBadState) {
+		return isBadState || !(!animDisabled && !hide);
 	})))
-, _content(parent, st::callMuteButtonActive, &st::callMuteButtonMuted)
+, _content(base::make_unique_q<AbstractButton>(parent))
+, _label(base::make_unique_q<FlatLabel>(
+	parent,
+	_state.value(
+	) | rpl::map([](const CallMuteButtonState &state) {
+		return state.text;
+	}),
+	_st.label))
 , _radial(nullptr)
 , _colors(Colors())
 , _crossLineMuteAnimation(st::callMuteCrossLine) {
 	init();
+}
+
+void CallMuteButton::init() {
+	_content->resize(_st.button.width, _st.button.height);
 
 	style::PaletteChanged(
 	) | rpl::start_with_next([=] {
 		_crossLineMuteAnimation.invalidate();
 	}, lifetime());
-}
 
-void CallMuteButton::init() {
 	// Label text.
-	auto text = _state.value(
-	) | rpl::map([](const CallMuteButtonState &state) {
-		return state.text;
-	});
-	_content.setText(std::move(text));
+	_label->show();
+	rpl::combine(
+		_content->geometryValue(),
+		_label->geometryValue()
+	) | rpl::start_with_next([=](QRect my, QRect label) {
+		_label->moveToLeft(
+			my.x() + (my.width() - label.width()) / 2,
+			my.y() + my.height() - label.height(),
+			my.width());
+	}, _label->lifetime());
+	_label->setAttribute(Qt::WA_TransparentForMouseEvents);
 
 	_radialShowProgress.value(
 	) | rpl::start_with_next([=](float64 value) {
@@ -319,7 +333,7 @@ void CallMuteButton::init() {
 		}
 		if ((value > 0.) && !anim::Disabled() && !_radial) {
 			_radial = std::make_unique<InfiniteRadialAnimation>(
-				[=] { _content.update(); },
+				[=] { _content->update(); },
 				st::callConnectingRadial);
 			_radial->start();
 		}
@@ -330,11 +344,16 @@ void CallMuteButton::init() {
 		lifetime().make_state<CallMuteButtonType>(_state.current().type);
 	setEnableMouse(false);
 
-	const auto blobsInner = _blobs->innerRect();
+	const auto blobsInner = [&] {
+		// The point of the circle at 45 degrees.
+		const auto mF = std::sqrt(_blobs->innerRect().width()) / 2.;
+		return _blobs->innerRect().marginsRemoved(QMarginsF(mF, mF, mF, mF));
+	}();
+
 	auto linearGradients = anim::linear_gradients<CallMuteButtonType>(
 		_colors,
-		QPointF(blobsInner.x(), blobsInner.y() + blobsInner.height()),
-		QPointF(blobsInner.x() + blobsInner.width(), blobsInner.y()));
+		QPointF(blobsInner.x() + blobsInner.width(), blobsInner.y()),
+		QPointF(blobsInner.x(), blobsInner.y() + blobsInner.height()));
 
 	auto glowColors = [&] {
 		auto copy = _colors;
@@ -384,15 +403,15 @@ void CallMuteButton::init() {
 
 			const auto crossProgress = (crossFrom == crossTo)
 				? crossTo
-				: InterpolateF(crossFrom, crossTo, value);
+				: anim::interpolateF(crossFrom, crossTo, value);
 			if (crossProgress != _crossLineProgress) {
 				_crossLineProgress = crossProgress;
-				_content.update(_muteIconPosition);
+				_content->update(_muteIconPosition);
 			}
 
 			const auto radialShowProgress = (radialShowFrom == radialShowTo)
 				? radialShowTo
-				: InterpolateF(radialShowFrom, radialShowTo, value);
+				: anim::interpolateF(radialShowFrom, radialShowTo, value);
 			if (radialShowProgress != _radialShowProgress.current()) {
 				_radialShowProgress = radialShowProgress;
 			}
@@ -412,10 +431,10 @@ void CallMuteButton::init() {
 	}, lifetime());
 
 	// Icon rect.
-	_content.sizeValue(
+	_content->sizeValue(
 	) | rpl::start_with_next([=](QSize size) {
-		const auto &icon = st::callMuteButtonActive.button.icon;
-		const auto &pos = st::callMuteButtonActive.button.iconPosition;
+		const auto &icon = _st.button.icon;
+		const auto &pos = _st.button.iconPosition;
 
 		_muteIconPosition = QRect(
 			(pos.x() < 0) ? ((size.width() - icon.width()) / 2) : pos.x(),
@@ -425,34 +444,23 @@ void CallMuteButton::init() {
 	}, lifetime());
 
 	// Paint.
-	auto filterCallback = [=](not_null<QEvent*> e) {
-		if (e->type() != QEvent::Paint) {
-			return base::EventFilterResult::Continue;
-		}
-		contentPaint();
-		return base::EventFilterResult::Cancel;
-	};
+	_content->paintRequest(
+	) | rpl::start_with_next([=](QRect clip) {
+		Painter p(_content);
 
-	auto filter = base::install_event_filter(
-		&_content,
-		std::move(filterCallback));
-
-	lifetime().make_state<base::unique_qptr<QObject>>(std::move(filter));
-}
-
-void CallMuteButton::contentPaint() {
-	Painter p(&_content);
-
-	const auto progress = 1. - _crossLineProgress;
-	_crossLineMuteAnimation.paint(p, _muteIconPosition.topLeft(), progress);
-
-	if (_radial) {
-		p.setOpacity(_radialShowProgress.current());
-		_radial->draw(
+		_crossLineMuteAnimation.paint(
 			p,
-			st::callMuteButtonActive.bgPosition,
-			_content.width());
-	}
+			_muteIconPosition.topLeft(),
+			1. - _crossLineProgress);
+
+		if (_radial) {
+			p.setOpacity(_radialShowProgress.current());
+			_radial->draw(
+				p,
+				_st.bgPosition,
+				_content->width());
+		}
+	}, _content->lifetime());
 }
 
 void CallMuteButton::setState(const CallMuteButtonState &state) {
@@ -465,7 +473,7 @@ void CallMuteButton::setLevel(float level) {
 }
 
 rpl::producer<Qt::MouseButton> CallMuteButton::clicks() const {
-	return _content.clicks();
+	return _content->clicks();
 }
 
 QSize CallMuteButton::innerSize() const {
@@ -473,49 +481,56 @@ QSize CallMuteButton::innerSize() const {
 }
 
 QRect CallMuteButton::innerGeometry() const {
-	const auto skip = st::callMuteButtonActive.outerRadius;
+	const auto &skip = _st.outerRadius;
 	return QRect(
-		_content.x(),
-		_content.y(),
-		_content.width() - 2 * skip,
-		_content.width() - 2 * skip);
+		_content->x(),
+		_content->y(),
+		_content->width() - 2 * skip,
+		_content->width() - 2 * skip);
 }
 
 void CallMuteButton::moveInner(QPoint position) {
-	const auto skip = st::callMuteButtonActive.outerRadius;
-	_content.move(position - QPoint(skip, skip));
+	const auto &skip = _st.outerRadius;
+	_content->move(position - QPoint(skip, skip));
 
 	{
 		const auto offset = QPoint(
-			(_blobs->width() - _content.width()) / 2,
-			(_blobs->height() - _content.width()) / 2);
-		_blobs->move(_content.pos() - offset);
+			(_blobs->width() - _content->width()) / 2,
+			(_blobs->height() - _content->width()) / 2);
+		_blobs->move(_content->pos() - offset);
 	}
 }
 
 void CallMuteButton::setVisible(bool visible) {
-	_content.setVisible(visible);
+	_content->setVisible(visible);
 	_blobs->setVisible(visible);
 }
 
 void CallMuteButton::raise() {
 	_blobs->raise();
-	_content.raise();
+	_content->raise();
 }
 
 void CallMuteButton::lower() {
-	_content.lower();
+	_content->lower();
 	_blobs->lower();
 }
 
 void CallMuteButton::setEnableMouse(bool value) {
-	_content.setAttribute(Qt::WA_TransparentForMouseEvents, !value);
+	_content->setAttribute(Qt::WA_TransparentForMouseEvents, !value);
 }
 
 void CallMuteButton::overridesColors(
 		CallMuteButtonType fromType,
 		CallMuteButtonType toType,
 		float64 progress) {
+	const auto forceMutedToConnecting = [](CallMuteButtonType &type) {
+		if (type == CallMuteButtonType::ForceMuted) {
+			type = CallMuteButtonType::Connecting;
+		}
+	};
+	forceMutedToConnecting(toType);
+	forceMutedToConnecting(fromType);
 	const auto toInactive = IsInactive(toType);
 	const auto fromInactive = IsInactive(fromType);
 	if (toInactive && (progress == 1)) {
