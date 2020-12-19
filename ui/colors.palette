@@ -554,25 +554,29 @@ callHangupBg: #d75a5a; // phone call popup hangup button background
 callHangupRipple: #c04646; // phone call popup hangup button ripple effect
 callMuteRipple: #ffffff12; // phone call popup mute mic and camera ripple effect
 
-groupCallBg: #131417; // group call popup background
+groupCallBg: #1a2026; // group call popup background
 groupCallActiveFg: #4db8ff; // group call active controls text
-groupCallMembersBg: #1a1c1f; // group call members list background
-groupCallMembersBgOver: #22252a; // group call members list row with mouse over
-groupCallMembersBgRipple: #272b30; // group call member row ripple effect
+groupCallMembersBg: #2c333d; // group call members list background
+groupCallMembersBgOver: #323a45; // group call members list row with mouse over
+groupCallMembersBgRipple: #39424f; // group call member row ripple effect
 groupCallMembersFg: #ffffff; // group call member name text
-groupCallMemberActiveIcon: #3fe069; // group call active member icon
-groupCallMemberActiveStatus: #67e66d; // group call active member status text
-groupCallMemberInactiveIcon: #61666b; // group call inactive member icon
-groupCallMemberInactiveStatus: #4db8ff; // group call inactive member status text
-groupCallMemberMutedIcon: #ff4f4d; // group call muted by admin member icon
-groupCallMemberNotJoinedStatus: #61666b; // group call non joined member status text
+groupCallMemberActiveIcon: #8deb90; // group call active member icon
+groupCallMemberActiveStatus: #8deb90; // group call active member status text
+groupCallMemberInactiveIcon: #84888f; // group call inactive member icon
+groupCallMemberInactiveStatus: #61c0ff; // group call inactive member status text
+groupCallMemberMutedIcon: #ed7372; // group call muted by admin member icon
+groupCallMemberNotJoinedStatus: #91979e; // group call non joined member status text
 groupCallIconFg: #ffffff; // group call mute / settings / leave icon
 groupCallLive1: #0dcc39; // group call live button color1
 groupCallLive2: #0bb6bd; // group call live button color2
 groupCallMuted1: #0992ef; // group call muted button color1
 groupCallMuted2: #16ccfb; // group call muted button color2
-groupCallForceMuted1: #d4527c; // group call force muted button color1
-groupCallForceMuted2: #5d8efa; // group call force muted button color2
+groupCallForceMutedBar1: #c65493; // group call force muted top bar color1
+groupCallForceMutedBar2: #7a6af1; // group call force muted top bar color2
+groupCallForceMutedBar3: #5f95e8; // group call force muted top bar color3
+groupCallForceMuted1: #4f9cff; // group call force muted button color1
+groupCallForceMuted2: #9b52e9; // group call force muted button color2
+groupCallForceMuted3: #eb5353; // group call force muted button color3
 groupCallMenuBg: #292d33; // group call popup menu background
 groupCallMenuBgOver: #343940; // group call popup menu with mouse over
 groupCallMenuBgRipple: #3a4047; // group call popup menu ripple effect

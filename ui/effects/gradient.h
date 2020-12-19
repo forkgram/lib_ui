@@ -14,14 +14,47 @@
 
 namespace anim {
 
+struct gradient_colors {
+	explicit gradient_colors(QColor color) {
+		stops.push_back({ 0., color });
+		stops.push_back({ 1., color });
+	}
+	explicit gradient_colors(std::vector<QColor> colors) {
+		if (colors.size() == 1) {
+			gradient_colors(colors.front());
+			return;
+		}
+		const auto last = float(colors.size() - 1);
+		for (auto i = 0; i < colors.size(); i++) {
+			stops.push_back({ i / last, std::move(colors[i]) });
+		}
+	}
+	explicit gradient_colors(QGradientStops colors)
+	: stops(std::move(colors)) {
+	}
+
+	QGradientStops stops;
+};
+
 namespace details {
 
 template <typename T, typename Derived>
 class gradients {
 public:
-	gradients(base::flat_map<T, std::vector<QColor>> colors)
-	: _colors(colors) {
-		Expects(_colors.size() > 0);
+	gradients(base::flat_map<T, std::vector<QColor>> colors) {
+		Expects(colors.size() > 0);
+
+		for (const auto &[key, value] : colors) {
+			auto c = gradient_colors(std::move(value));
+			_gradients.emplace(key, gradient_with_stops(std::move(c.stops)));
+		}
+	}
+	gradients(base::flat_map<T, gradient_colors> colors) {
+		Expects(colors.size() > 0);
+
+		for (const auto &[key, c] : colors) {
+			_gradients.emplace(key, gradient_with_stops(std::move(c.stops)));
+		}
 	}
 
 	QGradient gradient(T state1, T state2, float64 b_ratio) const {
@@ -31,40 +64,93 @@ public:
 			return _gradients.find(state2)->second;
 		}
 
-		auto gradient = static_cast<const Derived*>(this)->empty_gradient();
-		const auto size = _colors.front().second.size();
-		const auto colors1 = _colors.find(state1);
-		const auto colors2 = _colors.find(state2);
+		auto gradient = empty_gradient();
+		const auto gradient1 = _gradients.find(state1);
+		const auto gradient2 = _gradients.find(state2);
 
-		Assert(colors1 != end(_colors));
-		Assert(colors2 != end(_colors));
+		Assert(gradient1 != end(_gradients));
+		Assert(gradient2 != end(_gradients));
 
-		for (auto i = 0; i < size; i++) {
-			auto c = color(colors1->second[i], colors2->second[i], b_ratio);
-			gradient.setColorAt(i / (size - 1), std::move(c));
+		const auto stopsFrom = gradient1->second.stops();
+		const auto stopsTo = gradient2->second.stops();
+
+		if ((stopsFrom.size() == stopsTo.size())
+			&& ranges::equal(
+				stopsFrom,
+				stopsTo,
+				ranges::equal_to(),
+				&QGradientStop::first,
+				&QGradientStop::first)) {
+
+			const auto size = stopsFrom.size();
+			const auto &p = b_ratio;
+			for (auto i = 0; i < size; i++) {
+				auto c = color(stopsFrom[i].second, stopsTo[i].second, p);
+				gradient.setColorAt(stopsTo[i].first, std::move(c));
+			}
+			return gradient;
+		}
+
+		const auto invert = (stopsFrom.size() > stopsTo.size());
+		if (invert) {
+			b_ratio = 1. - b_ratio;
+		}
+
+		const auto &stops1 = invert ? stopsTo : stopsFrom;
+		const auto &stops2 = invert ? stopsFrom : stopsTo;
+
+		const auto size1 = stops1.size();
+		const auto size2 = stops2.size();
+
+		for (auto i = 0; i < size1; i++) {
+			const auto point1 = stops1[i].first;
+			const auto previousPoint1 = i ? stops1[i - 1].first : -1.;
+
+			for (auto n = 0; n < size2; n++) {
+				const auto point2 = stops2[n].first;
+
+				if ((point2 <= previousPoint1) || (point2 > point1)) {
+					continue;
+				}
+				const auto color2 = stops2[n].second;
+				QColor result;
+				if (point2 < point1) {
+					const auto pointRatio2 = (point2 - previousPoint1)
+						/ (point1 - previousPoint1);
+					const auto color1 = color(
+						stops1[i - 1].second,
+						stops1[i].second,
+						pointRatio2);
+
+					result = color(color1, color2, b_ratio);
+				} else {
+					// point2 == point1
+					result = color(stops1[i].second, color2, b_ratio);
+				}
+				gradient.setColorAt(point2, std::move(result));
+			}
 		}
 		return gradient;
 	}
 
 protected:
 	void cache_gradients() {
-		_gradients = base::flat_map<T, QGradient>();
-		for (const auto &[key, value] : _colors) {
-			_gradients.emplace(key, gradient(value));
+		auto copy = std::move(_gradients);
+		for (const auto &[key, value] : copy) {
+			_gradients.emplace(key, gradient_with_stops(value.stops()));
 		}
 	}
 
 private:
-	QGradient gradient(const std::vector<QColor> &colors) const {
-		auto gradient = static_cast<const Derived*>(this)->empty_gradient();
-		const auto size = colors.size();
-		for (auto i = 0; i < size; i++) {
-			gradient.setColorAt(i / (size - 1), colors[i]);
-		}
+	QGradient empty_gradient() const {
+		return static_cast<const Derived*>(this)->empty_gradient();
+	}
+	QGradient gradient_with_stops(QGradientStops stops) const {
+		auto gradient = empty_gradient();
+		gradient.setStops(std::move(stops));
 		return gradient;
 	}
 
-	base::flat_map<T, std::vector<QColor>> _colors;
 	base::flat_map<T, QGradient> _gradients;
 
 };
@@ -79,6 +165,13 @@ class linear_gradients final
 public:
 	linear_gradients(
 		base::flat_map<T, std::vector<QColor>> colors,
+		QPointF point1,
+		QPointF point2)
+	: parent(std::move(colors)) {
+		set_points(point1, point2);
+	}
+	linear_gradients(
+		base::flat_map<T, gradient_colors> colors,
 		QPointF point1,
 		QPointF point2)
 	: parent(std::move(colors)) {
@@ -114,6 +207,13 @@ class radial_gradients final
 public:
 	radial_gradients(
 		base::flat_map<T, std::vector<QColor>> colors,
+		QPointF center,
+		float radius)
+	: parent(std::move(colors)) {
+		set_points(center, radius);
+	}
+	radial_gradients(
+		base::flat_map<T, gradient_colors> colors,
 		QPointF center,
 		float radius)
 	: parent(std::move(colors)) {

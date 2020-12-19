@@ -1416,27 +1416,32 @@ defaultToast: Toast {
 
 callMuteMainBlobMinRadius: 57px;
 callMuteMainBlobMaxRadius: 63px;
-callMuteMinorBlobMinRadius: 62px;
-callMuteMinorBlobMaxRadius: 72px;
-callMuteMajorBlobMinRadius: 65px;
-callMuteMajorBlobMaxRadius: 75px;
+callMuteMinorBlobMinRadius: 64px;
+callMuteMinorBlobMaxRadius: 74px;
+callMuteMajorBlobMinRadius: 67px;
+callMuteMajorBlobMaxRadius: 77px;
 
 callMuteButtonActiveIcon: icon {{ "calls/voice_unmuted_large", groupCallIconFg }};
 callMuteButtonActiveInner: IconButton {
 	width: 136px;
-	height: 151px;
+	height: 165px;
 
 	iconPosition: point(-1px, 50px);
 	icon: callMuteButtonActiveIcon;
 }
 callMuteButtonLabel: FlatLabel(defaultFlatLabel) {
-	textFg: callNameFg;
+	textFg: groupCallMembersFg;
 	style: TextStyle(defaultTextStyle) {
-		font: font(13px);
-		linkFont: font(13px);
-		linkFontOver: font(13px underline);
+		font: font(14px);
+		linkFont: font(14px);
+		linkFontOver: font(14px underline);
 	}
 }
+callMuteButtonSublabel: FlatLabel(defaultFlatLabel) {
+	textFg: groupCallMemberNotJoinedStatus;
+}
+callMuteButtonLabelsSkip: 5px;
+callMuteButtonSublabelSkip: 19px;
 callMuteButtonActive: CallButton {
 	button: callMuteButtonActiveInner;
 	bg: groupCallLive1;
@@ -1460,6 +1465,7 @@ callMuteButtonConnecting: CallButton(callMuteButtonMuted) {
 	bg: callIconBg;
 	label: callMuteButtonLabel;
 }
+callMuteButtonLabelAdditional: 5px;
 
 callMuteCrossLine: CrossLineAnimation {
 	fg: groupCallIconFg;
@@ -1474,6 +1480,8 @@ callConnectingRadial: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
 	thickness: 4px;
 	size: size(100px, 100px);
 }
+
+shakeShift: 4px;
 
 // Windows specific title
 

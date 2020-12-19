@@ -8,8 +8,6 @@
 
 #include "base/flat_map.h"
 #include "ui/abstract_button.h"
-#include "ui/effects/gradient.h"
-#include "ui/effects/radial_animation.h"
 #include "ui/paint/blobs.h"
 #include "ui/painter.h"
 #include "ui/widgets/call_button.h"
@@ -18,8 +16,9 @@
 #include "styles/palette.h"
 #include "styles/style_widgets.h"
 
-namespace Ui {
+#include <QtCore/QtMath>
 
+namespace Ui {
 namespace {
 
 using Radiuses = Paint::Blob::Radiuses;
@@ -46,20 +45,32 @@ constexpr auto kGlowAlpha = 150;
 constexpr auto kOverrideColorBgAlpha = 76;
 constexpr auto kOverrideColorRippleAlpha = 50;
 
-constexpr auto kSwitchStateDuration = 120;
+constexpr auto kShiftDuration = crl::time(300);
+constexpr auto kSwitchStateDuration = crl::time(120);
+constexpr auto kSwitchLabelDuration = crl::time(180);
+
+// Switch state from Connecting animation.
+constexpr auto kSwitchRadialDuration = crl::time(350);
+constexpr auto kSwitchCirclelDuration = crl::time(275);
+constexpr auto kBlobsScaleEnterDuration = crl::time(400);
+constexpr auto kSwitchStateFromConnectingDuration = kSwitchRadialDuration
+	+ kSwitchCirclelDuration
+	+ kBlobsScaleEnterDuration;
+
+constexpr auto kRadialEndPartAnimation = float(kSwitchRadialDuration)
+	/ kSwitchStateFromConnectingDuration;
+constexpr auto kBlobsWidgetPartAnimation = 1. - kRadialEndPartAnimation;
+constexpr auto kFillCirclePartAnimation = float(kSwitchCirclelDuration)
+	/ (kSwitchCirclelDuration + kBlobsScaleEnterDuration);
+constexpr auto kBlobPartAnimation = float(kBlobsScaleEnterDuration)
+	/ (kSwitchCirclelDuration + kBlobsScaleEnterDuration);
+
+constexpr auto kOverlapProgressRadialHide = 1.2;
+
+constexpr auto kRadialFinishArcShift = 1200;
 
 auto MuteBlobs() {
 	return std::vector<Paint::Blobs::BlobData>{
-		{
-			.segmentsCount = 6,
-			.minScale = 1.,
-			.minRadius = st::callMuteMainBlobMinRadius
-				* kMainRadiusFactor,
-			.maxRadius = st::callMuteMainBlobMaxRadius
-				* kMainRadiusFactor,
-			.speedScale = .4,
-			.alpha = 1.,
-		},
 		{
 			.segmentsCount = 9,
 			.minScale = kScaleSmallMin / kScaleSmallMax,
@@ -89,22 +100,26 @@ auto MuteBlobs() {
 
 auto Colors() {
 	using Vector = std::vector<QColor>;
-	return base::flat_map<CallMuteButtonType, Vector>{
+	using Colors = anim::gradient_colors;
+	return base::flat_map<CallMuteButtonType, Colors>{
 		{
 			CallMuteButtonType::ForceMuted,
-			Vector{ st::groupCallForceMuted1->c, st::groupCallForceMuted2->c }
+			Colors(QGradientStops{
+				{ .0, st::groupCallForceMuted1->c },
+				{ .5, st::groupCallForceMuted2->c },
+				{ 1., st::groupCallForceMuted3->c } })
 		},
 		{
 			CallMuteButtonType::Active,
-			Vector{ st::groupCallLive1->c, st::groupCallLive2->c }
+			Colors(Vector{ st::groupCallLive1->c, st::groupCallLive2->c })
 		},
 		{
 			CallMuteButtonType::Connecting,
-			Vector{ st::callIconBg->c, st::callIconBg->c }
+			Colors(st::callIconBg->c)
 		},
 		{
 			CallMuteButtonType::Muted,
-			Vector{ st::groupCallMuted1->c, st::groupCallMuted2->c }
+			Colors(Vector{ st::groupCallMuted1->c, st::groupCallMuted2->c })
 		},
 	};
 }
@@ -121,7 +136,122 @@ bool IsInactive(CallMuteButtonType type) {
 	return IsConnecting(type) || (type == CallMuteButtonType::ForceMuted);
 }
 
+auto Clamp(float64 value) {
+	return std::clamp(value, 0., 1.);
+}
+
+void ComputeRadialFinish(
+		int &value,
+		float64 progress,
+		int to = -RadialState::kFull) {
+	value = anim::interpolate(value, to, Clamp(progress));
+}
+
 } // namespace
+
+class AnimatedLabel final : public RpWidget {
+public:
+	AnimatedLabel(
+		QWidget *parent,
+		rpl::producer<QString> &&text,
+		crl::time duration,
+		int additionalHeight,
+		const style::FlatLabel &st = st::defaultFlatLabel);
+
+	int height() const;
+
+private:
+	int realHeight() const;
+
+	void setText(const QString &text);
+
+	const style::FlatLabel &_st;
+	const crl::time _duration;
+	const int _additionalHeight;
+	const TextParseOptions _options;
+
+	Text::String _text;
+	Text::String _previousText;
+
+	Animations::Simple _animation;
+
+};
+
+AnimatedLabel::AnimatedLabel(
+	QWidget *parent,
+	rpl::producer<QString> &&text,
+	crl::time duration,
+	int additionalHeight,
+	const style::FlatLabel &st)
+: RpWidget(parent)
+, _st(st)
+, _duration(duration)
+, _additionalHeight(additionalHeight)
+, _options({ 0, 0, 0, Qt::LayoutDirectionAuto }) {
+	std::move(
+		text
+	) | rpl::start_with_next([=](const QString &value) {
+		setText(value);
+	}, lifetime());
+
+	paintRequest(
+	) | rpl::start_with_next([=] {
+		Painter p(this);
+		const auto progress = _animation.value(1.);
+
+		p.setFont(_st.style.font);
+		p.setPen(_st.textFg);
+		p.setTextPalette(_st.palette);
+
+		const auto textHeight = height();
+		const auto diffHeight = realHeight() - textHeight;
+		const auto center = (diffHeight) / 2;
+
+		p.setOpacity(1. - progress);
+		if (p.opacity()) {
+			_previousText.draw(
+				p,
+				0,
+				anim::interpolate(center, diffHeight, progress),
+				width(),
+				style::al_center);
+		}
+
+		p.setOpacity(progress);
+		if (p.opacity()) {
+			_text.draw(
+				p,
+				0,
+				anim::interpolate(0, center, progress),
+				width(),
+				style::al_center);
+		}
+	}, lifetime());
+}
+
+int AnimatedLabel::height() const {
+	return _st.style.font->height;
+}
+
+int AnimatedLabel::realHeight() const {
+	return RpWidget::height();
+}
+
+void AnimatedLabel::setText(const QString &text) {
+	if (_text.toString() == text) {
+		return;
+	}
+	_previousText = _text;
+	_text.setText(_st.style, text, _options);
+
+	const auto width = std::max(
+		_st.style.font->width(_text.toString()),
+		_st.style.font->width(_previousText.toString()));
+	resize(width + _additionalHeight, height() + _additionalHeight * 2);
+
+	_animation.stop();
+	_animation.start([=] { update(); }, 0., 1., _duration);
+}
 
 class BlobsWidget final : public RpWidget {
 public:
@@ -135,18 +265,29 @@ public:
 
 	[[nodiscard]] QRectF innerRect() const;
 
+	[[nodiscard]] float64 switchConnectingProgress() const;
+	void setSwitchConnectingProgress(float64 progress);
+
 private:
 	void init();
 
 	Paint::Blobs _blobs;
 
+	const float _circleRadius;
 	QBrush _blobBrush;
 	QBrush _glowBrush;
 	int _center = 0;
-	QRectF _inner;
+	QRectF _circleRect;
+
+	float64 _switchConnectingProgress = 0.;
 
 	crl::time _blobsLastTime = 0;
 	crl::time _blobsHideLastTime = 0;
+
+	float64 _blobsScaleEnter = 0.;
+	crl::time _blobsScaleLastTime = 0;
+
+	bool _hideBlobs = true;
 
 	Animations::Basic _animation;
 
@@ -157,27 +298,23 @@ BlobsWidget::BlobsWidget(
 	rpl::producer<bool> &&hideBlobs)
 : RpWidget(parent)
 , _blobs(MuteBlobs(), kLevelDuration, kMaxLevel)
+, _circleRadius(st::callMuteButtonActive.bgSize / 2.)
 , _blobBrush(Qt::transparent)
 , _glowBrush(Qt::transparent)
-, _blobsLastTime(crl::now()) {
+, _blobsLastTime(crl::now())
+, _blobsScaleLastTime(crl::now()) {
 	init();
-
-	for (auto i = 0; i < _blobs.size(); i++) {
-		const auto radiuses = _blobs.radiusesAt(i);
-		auto radiusesChange = rpl::duplicate(
-			hideBlobs
-		) | rpl::distinct_until_changed(
-		) | rpl::map([=](bool hide) -> Radiuses {
-			return hide
-				? Radiuses{ radiuses.min, radiuses.min }
-				: radiuses;
-		});
-		_blobs.setRadiusesAt(std::move(radiusesChange), i);
-	}
 
 	std::move(
 		hideBlobs
 	) | rpl::start_with_next([=](bool hide) {
+		if (_hideBlobs != hide) {
+			const auto now = crl::now();
+			if ((now - _blobsScaleLastTime) >= kBlobsScaleEnterDuration) {
+				_blobsScaleLastTime = now;
+			}
+			_hideBlobs = hide;
+		}
 		if (hide) {
 			setLevel(0.);
 		}
@@ -200,9 +337,13 @@ void BlobsWidget::init() {
 	) | rpl::start_with_next([=](QSize size) {
 		_center = size.width() / 2;
 
-		const auto w = (size.width() - _blobs.maxRadius() * 2) / 2.;
-		const auto margins = QMarginsF(w, w, w, w);
-		_inner = QRectF(QPoint(), size).marginsRemoved(margins);
+		{
+			const auto &r = _circleRadius;
+			const auto left = (size.width() - r * 2.) / 2.;
+			const auto add = st::callConnectingRadial.thickness / 2;
+			_circleRect = QRectF(left, left, r * 2, r * 2).marginsAdded(
+				style::margins(add, add, add, add));
+		}
 	}, lifetime());
 
 	paintRequest(
@@ -221,17 +362,62 @@ void BlobsWidget::init() {
 
 		// Blobs.
 		p.translate(_center, _center);
-		_blobs.paint(p, _blobBrush);
+		const auto scale = (_switchConnectingProgress > 0.)
+			? anim::easeOutBack(
+				1.,
+				_blobsScaleEnter * (1. - Clamp(
+					_switchConnectingProgress / kBlobPartAnimation)))
+			: _blobsScaleEnter;
+		_blobs.paint(p, _blobBrush, scale);
+
+		// Main circle.
+		p.translate(-_center, -_center);
+		p.setPen(Qt::NoPen);
+		p.setBrush(_blobBrush);
+		p.drawEllipse(_circleRect);
+
+		if (_switchConnectingProgress > 0.) {
+			p.resetTransform();
+
+			const auto circleProgress =
+				Clamp(_switchConnectingProgress - kBlobPartAnimation)
+					/ kFillCirclePartAnimation;
+
+			const auto mF = (_circleRect.width() / 2) * (1. - circleProgress);
+			const auto cutOutRect = _circleRect.marginsRemoved(
+				QMarginsF(mF, mF, mF, mF));
+
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::callConnectingRadial.color);
+			p.setOpacity(circleProgress);
+			p.drawEllipse(_circleRect);
+
+			p.setOpacity(1.);
+			p.setBrush(st::callIconBg);
+
+			p.save();
+			p.setCompositionMode(QPainter::CompositionMode_Source);
+			p.drawEllipse(cutOutRect);
+			p.restore();
+
+			p.drawEllipse(cutOutRect);
+		}
 	}, lifetime());
 
 	_animation.init([=](crl::time now) {
 		if (const auto &last = _blobsHideLastTime; (last > 0)
-			&& (now - last >= Paint::Blobs::kHideBlobsDuration)) {
+			&& (now - last >= kBlobsScaleEnterDuration)) {
 			_animation.stop();
 			return false;
 		}
 		_blobs.updateLevel(now - _blobsLastTime);
 		_blobsLastTime = now;
+
+		const auto dt = Clamp(
+			(now - _blobsScaleLastTime) / float64(kBlobsScaleEnterDuration));
+		_blobsScaleEnter = _hideBlobs
+			? (1. - anim::easeInCirc(1., dt))
+			: anim::easeOutBack(1., dt);
 
 		update();
 		return true;
@@ -247,7 +433,7 @@ void BlobsWidget::init() {
 }
 
 QRectF BlobsWidget::innerRect() const {
-	return _inner;
+	return _circleRect;
 }
 
 void BlobsWidget::setBlobBrush(QBrush brush) {
@@ -271,6 +457,14 @@ void BlobsWidget::setLevel(float level) {
 	_blobs.setLevel(level);
 }
 
+float64 BlobsWidget::switchConnectingProgress() const {
+	return _switchConnectingProgress;
+}
+
+void BlobsWidget::setSwitchConnectingProgress(float64 progress) {
+	_switchConnectingProgress = progress;
+}
+
 CallMuteButton::CallMuteButton(
 	not_null<RpWidget*> parent,
 	rpl::producer<bool> &&hideBlobs,
@@ -290,13 +484,33 @@ CallMuteButton::CallMuteButton(
 		return isBadState || !(!animDisabled && !hide);
 	})))
 , _content(base::make_unique_q<AbstractButton>(parent))
-, _label(base::make_unique_q<FlatLabel>(
+, _centerLabel(base::make_unique_q<AnimatedLabel>(
 	parent,
 	_state.value(
 	) | rpl::map([](const CallMuteButtonState &state) {
-		return state.text;
+		return state.subtext.isEmpty() ? state.text : QString();
 	}),
+	kSwitchLabelDuration,
+	st::callMuteButtonLabelAdditional,
 	_st.label))
+, _label(base::make_unique_q<AnimatedLabel>(
+	parent,
+	_state.value(
+	) | rpl::map([](const CallMuteButtonState &state) {
+		return state.subtext.isEmpty() ? QString() : state.text;
+	}),
+	kSwitchLabelDuration,
+	st::callMuteButtonLabelAdditional,
+	_st.label))
+, _sublabel(base::make_unique_q<AnimatedLabel>(
+	parent,
+	_state.value(
+	) | rpl::map([](const CallMuteButtonState &state) {
+		return state.subtext;
+	}),
+	kSwitchLabelDuration,
+	st::callMuteButtonLabelAdditional,
+	st::callMuteButtonSublabel))
 , _radial(nullptr)
 , _colors(Colors())
 , _crossLineMuteAnimation(st::callMuteCrossLine) {
@@ -315,17 +529,35 @@ void CallMuteButton::init() {
 	_label->show();
 	rpl::combine(
 		_content->geometryValue(),
-		_label->geometryValue()
-	) | rpl::start_with_next([=](QRect my, QRect label) {
-		_label->moveToLeft(
-			my.x() + (my.width() - label.width()) / 2,
-			my.y() + my.height() - label.height(),
-			my.width());
+		_label->sizeValue()
+	) | rpl::start_with_next([=](QRect my, QSize size) {
+		updateLabelGeometry(my, size);
 	}, _label->lifetime());
 	_label->setAttribute(Qt::WA_TransparentForMouseEvents);
 
-	_radialShowProgress.value(
+	_sublabel->show();
+	rpl::combine(
+		_content->geometryValue(),
+		_sublabel->sizeValue()
+	) | rpl::start_with_next([=](QRect my, QSize size) {
+		updateSublabelGeometry(my, size);
+	}, _sublabel->lifetime());
+	_sublabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	_centerLabel->show();
+	rpl::combine(
+		_content->geometryValue(),
+		_centerLabel->sizeValue()
+	) | rpl::start_with_next([=](QRect my, QSize size) {
+		updateCenterLabelGeometry(my, size);
+	}, _centerLabel->lifetime());
+	_centerLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+	_radialInfo.rawShowProgress.value(
 	) | rpl::start_with_next([=](float64 value) {
+		auto &info = _radialInfo;
+		info.realShowProgress = (1. - value) / kRadialEndPartAnimation;
+
 		if (((value == 0.) || anim::Disabled()) && _radial) {
 			_radial->stop();
 			_radial = nullptr;
@@ -334,19 +566,34 @@ void CallMuteButton::init() {
 		if ((value > 0.) && !anim::Disabled() && !_radial) {
 			_radial = std::make_unique<InfiniteRadialAnimation>(
 				[=] { _content->update(); },
-				st::callConnectingRadial);
+				_radialInfo.st);
 			_radial->start();
+		}
+		if ((info.realShowProgress < 1.) && !info.isDirectionToShow) {
+			_radial->stop(anim::type::instant);
+			_radial->start();
+			info.state = std::nullopt;
+			return;
+		}
+
+		if (value == 1.) {
+			info.state = std::nullopt;
+		} else {
+			if (_radial && !info.state.has_value()) {
+				info.state = _radial->computeState();
+			}
 		}
 	}, lifetime());
 
 	// State type.
 	const auto previousType =
 		lifetime().make_state<CallMuteButtonType>(_state.current().type);
-	setEnableMouse(false);
+	setHandleMouseState(HandleMouseState::Disabled);
 
 	const auto blobsInner = [&] {
 		// The point of the circle at 45 degrees.
-		const auto mF = std::sqrt(_blobs->innerRect().width()) / 2.;
+		const auto w = _blobs->innerRect().width();
+		const auto mF = (1 - std::cos(M_PI / 4.)) * (w / 2.);
 		return _blobs->innerRect().marginsRemoved(QMarginsF(mF, mF, mF, mF));
 	}();
 
@@ -357,13 +604,15 @@ void CallMuteButton::init() {
 
 	auto glowColors = [&] {
 		auto copy = _colors;
-		for (auto &[type, colors] : copy) {
-			if (IsInactive(type)) {
-				colors[0] = st::groupCallBg->c;
-			} else {
-				colors[0].setAlpha(kGlowAlpha);
-			}
-			colors[1] = QColor(Qt::transparent);
+		for (auto &[type, stops] : copy) {
+			auto firstColor = IsInactive(type)
+				? st::groupCallBg->c
+				: stops.stops[0].second;
+			firstColor.setAlpha(kGlowAlpha);
+			stops.stops = QGradientStops{
+				{ 0., std::move(firstColor) },
+				{ 1., QColor(Qt::transparent) }
+			};
 		}
 		return copy;
 	}();
@@ -379,24 +628,32 @@ void CallMuteButton::init() {
 		const auto previous = *previousType;
 		*previousType = type;
 
-		if (IsInactive(type) && !IsInactive(previous)) {
-			setEnableMouse(false);
+		const auto mouseState = HandleMouseStateFromType(type);
+		setHandleMouseState(HandleMouseState::Disabled);
+		if (mouseState != HandleMouseState::Enabled) {
+			setHandleMouseState(mouseState);
 		}
+
+		const auto fromConnecting = IsConnecting(previous);
+		const auto toConnecting = IsConnecting(type);
 
 		const auto crossFrom = IsMuted(previous) ? 0. : 1.;
 		const auto crossTo = IsMuted(type) ? 0. : 1.;
 
-		const auto radialShowFrom = IsConnecting(previous) ? 1. : 0.;
-		const auto radialShowTo = IsConnecting(type) ? 1. : 0.;
+		const auto radialShowFrom = fromConnecting ? 1. : 0.;
+		const auto radialShowTo = toConnecting ? 1. : 0.;
 
-		const auto from = _switchAnimation.animating()
+		const auto from = (_switchAnimation.animating() && !fromConnecting)
 			? (1. - _switchAnimation.value(0.))
 			: 0.;
 		const auto to = 1.;
 
+		_radialInfo.isDirectionToShow = fromConnecting;
+
 		auto callback = [=](float64 value) {
+			const auto brushProgress = fromConnecting ? 1. : value;
 			_blobs->setBlobBrush(QBrush(
-				linearGradients.gradient(previous, type, value)));
+				linearGradients.gradient(previous, type, brushProgress)));
 			_blobs->setGlowBrush(QBrush(
 				glows.gradient(previous, type, value)));
 			_blobs->update();
@@ -406,27 +663,29 @@ void CallMuteButton::init() {
 				: anim::interpolateF(crossFrom, crossTo, value);
 			if (crossProgress != _crossLineProgress) {
 				_crossLineProgress = crossProgress;
-				_content->update(_muteIconPosition);
+				_content->update(_muteIconRect);
 			}
 
 			const auto radialShowProgress = (radialShowFrom == radialShowTo)
 				? radialShowTo
 				: anim::interpolateF(radialShowFrom, radialShowTo, value);
-			if (radialShowProgress != _radialShowProgress.current()) {
-				_radialShowProgress = radialShowProgress;
+			if (radialShowProgress != _radialInfo.rawShowProgress.current()) {
+				_radialInfo.rawShowProgress = radialShowProgress;
+				_blobs->setSwitchConnectingProgress(Clamp(
+					radialShowProgress / kBlobsWidgetPartAnimation));
 			}
 
 			overridesColors(previous, type, value);
 
 			if (value == to) {
-				if (!IsInactive(type) && IsInactive(previous)) {
-					setEnableMouse(true);
-				}
+				setHandleMouseState(mouseState);
 			}
 		};
 
 		_switchAnimation.stop();
-		const auto duration = (1. - from) * kSwitchStateDuration;
+		const auto duration = (1. - from) * ((fromConnecting || toConnecting)
+			? kSwitchStateFromConnectingDuration
+			: kSwitchStateDuration);
 		_switchAnimation.start(std::move(callback), from, to, duration);
 	}, lifetime());
 
@@ -436,7 +695,7 @@ void CallMuteButton::init() {
 		const auto &icon = _st.button.icon;
 		const auto &pos = _st.button.iconPosition;
 
-		_muteIconPosition = QRect(
+		_muteIconRect = QRect(
 			(pos.x() < 0) ? ((size.width() - icon.width()) / 2) : pos.x(),
 			(pos.y() < 0) ? ((size.height() - icon.height()) / 2) : pos.y(),
 			icon.width(),
@@ -450,17 +709,121 @@ void CallMuteButton::init() {
 
 		_crossLineMuteAnimation.paint(
 			p,
-			_muteIconPosition.topLeft(),
+			_muteIconRect.topLeft(),
 			1. - _crossLineProgress);
 
-		if (_radial) {
-			p.setOpacity(_radialShowProgress.current());
-			_radial->draw(
+		if (_radialInfo.state.has_value() && _switchAnimation.animating()) {
+			const auto radialProgress = _radialInfo.realShowProgress;
+
+			auto r = *_radialInfo.state;
+			r.shown = 1.;
+			if (_radialInfo.isDirectionToShow) {
+				const auto to = r.arcFrom - kRadialFinishArcShift;
+				ComputeRadialFinish(r.arcFrom, radialProgress, to);
+				ComputeRadialFinish(r.arcLength, radialProgress);
+			}
+
+			const auto opacity = (radialProgress > kOverlapProgressRadialHide)
+				? 0.
+				: _blobs->switchConnectingProgress();
+			p.setOpacity(opacity);
+			InfiniteRadialAnimation::Draw(
 				p,
+				r,
 				_st.bgPosition,
-				_content->width());
+				_radialInfo.st.size,
+				_content->width(),
+				QPen(_radialInfo.st.color),
+				_radialInfo.st.thickness);
+		} else if (_radial) {
+			auto state = _radial->computeState();
+			state.shown = 1.;
+
+			InfiniteRadialAnimation::Draw(
+				p,
+				std::move(state),
+				_st.bgPosition,
+				_radialInfo.st.size,
+				_content->width(),
+				QPen(_radialInfo.st.color),
+				_radialInfo.st.thickness);
 		}
 	}, _content->lifetime());
+}
+
+void CallMuteButton::updateLabelsGeometry() {
+	updateLabelGeometry(_content->geometry(), _label->size());
+	updateCenterLabelGeometry(_content->geometry(), _centerLabel->size());
+	updateSublabelGeometry(_content->geometry(), _sublabel->size());
+}
+
+void CallMuteButton::updateLabelGeometry(QRect my, QSize size) {
+	const auto skip = st::callMuteButtonSublabelSkip
+		+ st::callMuteButtonLabelsSkip;
+	_label->moveToLeft(
+		my.x() + (my.width() - size.width()) / 2 + _labelShakeShift,
+		my.y() + my.height() - _label->height() - skip,
+		my.width());
+}
+
+void CallMuteButton::updateCenterLabelGeometry(QRect my, QSize size) {
+	const auto skip = (st::callMuteButtonSublabelSkip / 2)
+		+ st::callMuteButtonLabelsSkip;
+	_centerLabel->moveToLeft(
+		my.x() + (my.width() - size.width()) / 2 + _labelShakeShift,
+		my.y() + my.height() - _centerLabel->height() - skip,
+		my.width());
+}
+
+void CallMuteButton::updateSublabelGeometry(QRect my, QSize size) {
+	const auto skip = st::callMuteButtonLabelsSkip;
+	_sublabel->moveToLeft(
+		my.x() + (my.width() - size.width()) / 2 + _labelShakeShift,
+		my.y() + my.height() - _sublabel->height() - skip,
+		my.width());
+}
+
+void CallMuteButton::shake() {
+	if (_shakeAnimation.animating()) {
+		return;
+	}
+	const auto update = [=] {
+		const auto fullProgress = _shakeAnimation.value(1.) * 6;
+		const auto segment = std::clamp(int(std::floor(fullProgress)), 0, 5);
+		const auto part = fullProgress - segment;
+		const auto from = (segment == 0)
+			? 0.
+			: (segment == 1 || segment == 3 || segment == 5)
+			? 1.
+			: -1.;
+		const auto to = (segment == 0 || segment == 2 || segment == 4)
+			? 1.
+			: (segment == 1 || segment == 3)
+			? -1.
+			: 0.;
+		const auto shift = from * (1. - part) + to * part;
+		_labelShakeShift = int(std::round(shift * st::shakeShift));
+		updateLabelsGeometry();
+	};
+	_shakeAnimation.start(
+		update,
+		0.,
+		1.,
+		kShiftDuration);
+}
+
+CallMuteButton::HandleMouseState CallMuteButton::HandleMouseStateFromType(
+		CallMuteButtonType type) {
+	switch (type) {
+	case CallMuteButtonType::Active:
+	case CallMuteButtonType::Muted:
+		return HandleMouseState::Enabled;
+	case CallMuteButtonType::Connecting:
+		return HandleMouseState::Disabled;
+	case CallMuteButtonType::ForceMuted:
+		return HandleMouseState::Blocked;
+	}
+	Unexpected("Type in HandleMouseStateFromType.");
 }
 
 void CallMuteButton::setState(const CallMuteButtonState &state) {
@@ -516,8 +879,15 @@ void CallMuteButton::lower() {
 	_blobs->lower();
 }
 
-void CallMuteButton::setEnableMouse(bool value) {
-	_content->setAttribute(Qt::WA_TransparentForMouseEvents, !value);
+void CallMuteButton::setHandleMouseState(HandleMouseState state) {
+	if (_handleMouseState == state) {
+		return;
+	}
+	_handleMouseState = state;
+	const auto handle = (_handleMouseState != HandleMouseState::Disabled);
+	const auto pointer = (_handleMouseState == HandleMouseState::Enabled);
+	_content->setAttribute(Qt::WA_TransparentForMouseEvents, !handle);
+	_content->setPointerCursor(pointer);
 }
 
 void CallMuteButton::overridesColors(
@@ -537,8 +907,8 @@ void CallMuteButton::overridesColors(
 		_colorOverrides.fire({ std::nullopt, std::nullopt });
 		return;
 	}
-	auto from = _colors.find(fromType)->second[0];
-	auto to = _colors.find(toType)->second[0];
+	auto from = _colors.find(fromType)->second.stops[0].second;
+	auto to = _colors.find(toType)->second.stops[0].second;
 	auto fromRipple = from;
 	auto toRipple = to;
 	if (!toInactive) {
