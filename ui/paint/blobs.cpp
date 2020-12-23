@@ -22,7 +22,11 @@ Blobs::Blobs(
 
 void Blobs::init() {
 	for (const auto &data : _blobDatas) {
-		auto blob = Paint::RadialBlob(data.segmentsCount, data.minScale);
+		auto blob = Paint::RadialBlob(
+			data.segmentsCount,
+			data.minScale,
+			data.minSpeed,
+			data.maxSpeed);
 		blob.setRadiuses({ data.minRadius, data.maxRadius });
 		blob.generateBlob();
 		_blobs.push_back(std::move(blob));
@@ -63,6 +67,10 @@ Blob::Radiuses Blobs::radiusesAt(int index) {
 void Blobs::setLevel(float value) {
 	const auto to = std::min(_maxLevel, value) / _maxLevel;
 	_levelValue.start(to);
+}
+
+void Blobs::resetLevel() {
+	_levelValue.reset();
 }
 
 void Blobs::paint(Painter &p, const QBrush &brush, float outerScale) {
