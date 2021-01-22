@@ -69,6 +69,8 @@ PRIVATE
     ui/layers/layer_manager.h
     ui/layers/layer_widget.cpp
     ui/layers/layer_widget.h
+    ui/paint/arcs.cpp
+    ui/paint/arcs.h
     ui/paint/blob.cpp
     ui/paint/blob.h
     ui/paint/blobs.cpp
@@ -146,8 +148,18 @@ PRIVATE
     ui/widgets/input_fields.h
     ui/widgets/labels.cpp
     ui/widgets/labels.h
-    ui/widgets/menu.cpp
-    ui/widgets/menu.h
+    ui/widgets/menu/menu.cpp
+    ui/widgets/menu/menu.h
+    ui/widgets/menu/menu_action.cpp
+    ui/widgets/menu/menu_action.h
+    ui/widgets/menu/menu_common.cpp
+    ui/widgets/menu/menu_common.h
+    ui/widgets/menu/menu_item_base.cpp
+    ui/widgets/menu/menu_item_base.h
+    ui/widgets/menu/menu_separator.cpp
+    ui/widgets/menu/menu_separator.h
+    ui/widgets/menu/menu_toggle.cpp
+    ui/widgets/menu/menu_toggle.h
     ui/widgets/popup_menu.cpp
     ui/widgets/popup_menu.h
     ui/widgets/scroll_area.cpp

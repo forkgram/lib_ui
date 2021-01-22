@@ -8,7 +8,7 @@
 
 #include "styles/style_widgets.h"
 #include "ui/widgets/inner_dropdown.h"
-#include "ui/widgets/menu.h"
+#include "ui/widgets/menu/menu.h"
 
 namespace Ui {
 
@@ -18,7 +18,7 @@ class DropdownMenu : public InnerDropdown {
 public:
 	DropdownMenu(QWidget *parent, const style::DropdownMenu &st = st::defaultDropdownMenu);
 
-	not_null<QAction*> addAction(const QString &text, const QObject *receiver, const char* member, const style::icon *icon = nullptr, const style::icon *iconOver = nullptr);
+	not_null<QAction*> addAction(base::unique_qptr<Menu::ItemBase> widget);
 	not_null<QAction*> addAction(const QString &text, Fn<void()> callback, const style::icon *icon = nullptr, const style::icon *iconOver = nullptr);
 	not_null<QAction*> addSeparator();
 	void clearActions();
@@ -28,6 +28,7 @@ public:
 	}
 
 	const std::vector<not_null<QAction*>> &actions() const;
+	bool empty() const;
 
 	~DropdownMenu();
 
@@ -56,9 +57,9 @@ private:
 	void hideFinish();
 
 	using TriggeredSource = Menu::TriggeredSource;
-	void handleActivated(QAction *action, int actionTop, TriggeredSource source);
-	void handleTriggered(QAction *action, int actionTop, TriggeredSource source);
-	void forwardKeyPress(int key);
+	void handleActivated(const Menu::CallbackData &data);
+	void handleTriggered(const Menu::CallbackData &data);
+	void forwardKeyPress(not_null<QKeyEvent*> e);
 	bool handleKeyPress(int key);
 	void forwardMouseMove(QPoint globalPosition) {
 		_menu->handleMouseMove(globalPosition);
@@ -74,14 +75,14 @@ private:
 	void handleMouseRelease(QPoint globalPosition);
 
 	using SubmenuPointer = QPointer<DropdownMenu>;
-	bool popupSubmenuFromAction(QAction *action, int actionTop, TriggeredSource source);
+	bool popupSubmenuFromAction(const Menu::CallbackData &data);
 	void popupSubmenu(SubmenuPointer submenu, int actionTop, TriggeredSource source);
 	void showMenu(const QPoint &p, DropdownMenu *parent, TriggeredSource source);
 
 	const style::DropdownMenu &_st;
 	Fn<void()> _hiddenCallback;
 
-	QPointer<Menu> _menu;
+	QPointer<Menu::Menu> _menu;
 
 	// Not ready with submenus yet.
 	//using Submenus = QMap<QAction*, SubmenuPointer>;

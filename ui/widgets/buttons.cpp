@@ -79,6 +79,10 @@ RippleButton::RippleButton(QWidget *parent, const style::RippleAnimation &st)
 
 void RippleButton::clearState() {
 	AbstractButton::clearState();
+	finishAnimating();
+}
+
+void RippleButton::finishAnimating() {
 	if (_ripple) {
 		_ripple.reset();
 		update();
@@ -392,7 +396,10 @@ void RoundButton::paintEvent(QPaintEvent *e) {
 		_numbers->paint(p, textLeft, textTop, width());
 	}
 	if (!_st.icon.empty()) {
-		_st.icon.paint(p, QPoint(iconLeft, iconTop), width());
+		const auto &current = ((over || down) && !_st.iconOver.empty())
+			? _st.iconOver
+			: _st.icon;
+		current.paint(p, QPoint(iconLeft, iconTop), width());
 	}
 }
 

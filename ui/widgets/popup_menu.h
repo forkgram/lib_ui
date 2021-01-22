@@ -7,7 +7,7 @@
 #pragma once
 
 #include "styles/style_widgets.h"
-#include "ui/widgets/menu.h"
+#include "ui/widgets/menu/menu.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/panel_animation.h"
 #include "ui/round_rect.h"
@@ -21,13 +21,14 @@ public:
 	PopupMenu(QWidget *parent, const style::PopupMenu &st = st::defaultPopupMenu);
 	PopupMenu(QWidget *parent, QMenu *menu, const style::PopupMenu &st = st::defaultPopupMenu);
 
-	not_null<QAction*> addAction(const QString &text, const QObject *receiver, const char* member, const style::icon *icon = nullptr, const style::icon *iconOver = nullptr);
+	not_null<QAction*> addAction(base::unique_qptr<Menu::ItemBase> widget);
 	not_null<QAction*> addAction(const QString &text, Fn<void()> callback, const style::icon *icon = nullptr, const style::icon *iconOver = nullptr);
 	not_null<QAction*> addAction(const QString &text, std::unique_ptr<PopupMenu> submenu);
 	not_null<QAction*> addSeparator();
 	void clearActions();
 
 	const std::vector<not_null<QAction*>> &actions() const;
+	bool empty() const;
 
 	void deleteOnHide(bool del);
 	void popup(const QPoint &p);
@@ -75,9 +76,9 @@ private:
 	using TriggeredSource = Menu::TriggeredSource;
 	void handleCompositingUpdate();
 	void handleMenuResize();
-	void handleActivated(QAction *action, int actionTop, TriggeredSource source);
-	void handleTriggered(QAction *action, int actionTop, TriggeredSource source);
-	void forwardKeyPress(int key);
+	void handleActivated(const Menu::CallbackData &data);
+	void handleTriggered(const Menu::CallbackData &data);
+	void forwardKeyPress(not_null<QKeyEvent*> e);
 	bool handleKeyPress(int key);
 	void forwardMouseMove(QPoint globalPosition) {
 		_menu->handleMouseMove(globalPosition);
@@ -93,14 +94,14 @@ private:
 	void handleMouseRelease(QPoint globalPosition);
 
 	using SubmenuPointer = QPointer<PopupMenu>;
-	bool popupSubmenuFromAction(QAction *action, int actionTop, TriggeredSource source);
+	bool popupSubmenuFromAction(const Menu::CallbackData &data);
 	void popupSubmenu(SubmenuPointer submenu, int actionTop, TriggeredSource source);
 	void showMenu(const QPoint &p, PopupMenu *parent, TriggeredSource source);
 
 	const style::PopupMenu &_st;
 
 	RoundRect _roundRect;
-	object_ptr<Menu> _menu;
+	object_ptr<Menu::Menu> _menu;
 
 	using Submenus = QMap<QAction*, SubmenuPointer>;
 	Submenus _submenus;

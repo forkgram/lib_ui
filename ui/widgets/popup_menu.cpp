@@ -52,12 +52,15 @@ void PopupMenu::init() {
 		hideMenu(true);
 	}, lifetime());
 
-	_menu->setResizedCallback([this] { handleMenuResize(); });
-	_menu->setActivatedCallback([this](QAction *action, int actionTop, TriggeredSource source) {
-		handleActivated(action, actionTop, source);
+	_menu->resizesFromInner(
+	) | rpl::start_with_next([=] {
+		handleMenuResize();
+	}, _menu->lifetime());
+	_menu->setActivatedCallback([this](const Menu::CallbackData &data) {
+		handleActivated(data);
 	});
-	_menu->setTriggeredCallback([this](QAction *action, int actionTop, TriggeredSource source) {
-		handleTriggered(action, actionTop, source);
+	_menu->setTriggeredCallback([this](const Menu::CallbackData &data) {
+		handleTriggered(data);
 	});
 	_menu->setKeyPressDelegate([this](int key) { return handleKeyPress(key); });
 	_menu->setMouseMoveDelegate([this](QPoint globalPosition) { handleMouseMove(globalPosition); });
@@ -88,8 +91,9 @@ void PopupMenu::handleMenuResize() {
 	_inner = rect().marginsRemoved(_padding);
 }
 
-not_null<QAction*> PopupMenu::addAction(const QString &text, const QObject *receiver, const char* member, const style::icon *icon, const style::icon *iconOver) {
-	return _menu->addAction(text, receiver, member, icon, iconOver);
+not_null<QAction*> PopupMenu::addAction(
+		base::unique_qptr<Menu::ItemBase> widget) {
+	return _menu->addAction(std::move(widget));
 }
 
 not_null<QAction*> PopupMenu::addAction(const QString &text, Fn<void()> callback, const style::icon *icon, const style::icon *iconOver) {
@@ -117,6 +121,10 @@ void PopupMenu::clearActions() {
 
 const std::vector<not_null<QAction*>> &PopupMenu::actions() const {
 	return _menu->actions();
+}
+
+bool PopupMenu::empty() const {
+	return _menu->empty();
 }
 
 void PopupMenu::paintEvent(QPaintEvent *e) {
@@ -153,9 +161,9 @@ void PopupMenu::paintBg(QPainter &p) {
 	}
 }
 
-void PopupMenu::handleActivated(QAction *action, int actionTop, TriggeredSource source) {
-	if (source == TriggeredSource::Mouse) {
-		if (!popupSubmenuFromAction(action, actionTop, source)) {
+void PopupMenu::handleActivated(const Menu::CallbackData &data) {
+	if (data.source == TriggeredSource::Mouse) {
+		if (!popupSubmenuFromAction(data)) {
 			if (auto currentSubmenu = base::take(_activeSubmenu)) {
 				currentSubmenu->hideMenu(true);
 			}
@@ -163,11 +171,11 @@ void PopupMenu::handleActivated(QAction *action, int actionTop, TriggeredSource 
 	}
 }
 
-void PopupMenu::handleTriggered(QAction *action, int actionTop, TriggeredSource source) {
-	if (!popupSubmenuFromAction(action, actionTop, source)) {
+void PopupMenu::handleTriggered(const Menu::CallbackData &data) {
+	if (!popupSubmenuFromAction(data)) {
 		_triggering = true;
 		hideMenu();
-		emit action->trigger();
+		emit data.action->trigger();
 		_triggering = false;
 		if (_deleteLater) {
 			_deleteLater = false;
@@ -176,12 +184,12 @@ void PopupMenu::handleTriggered(QAction *action, int actionTop, TriggeredSource 
 	}
 }
 
-bool PopupMenu::popupSubmenuFromAction(QAction *action, int actionTop, TriggeredSource source) {
-	if (auto submenu = _submenus.value(action)) {
+bool PopupMenu::popupSubmenuFromAction(const Menu::CallbackData &data) {
+	if (auto submenu = _submenus.value(data.action)) {
 		if (_activeSubmenu == submenu) {
 			submenu->hideMenu(true);
 		} else {
-			popupSubmenu(submenu, actionTop, source);
+			popupSubmenu(submenu, data.actionTop, data.source);
 		}
 		return true;
 	}
@@ -203,9 +211,9 @@ void PopupMenu::popupSubmenu(SubmenuPointer submenu, int actionTop, TriggeredSou
 	}
 }
 
-void PopupMenu::forwardKeyPress(int key) {
-	if (!handleKeyPress(key)) {
-		_menu->handleKeyPress(key);
+void PopupMenu::forwardKeyPress(not_null<QKeyEvent*> e) {
+	if (!handleKeyPress(e->key())) {
+		_menu->handleKeyPress(e);
 	}
 }
 
@@ -262,7 +270,7 @@ void PopupMenu::hideEvent(QHideEvent *e) {
 }
 
 void PopupMenu::keyPressEvent(QKeyEvent *e) {
-	forwardKeyPress(e->key());
+	forwardKeyPress(e);
 }
 
 void PopupMenu::mouseMoveEvent(QMouseEvent *e) {

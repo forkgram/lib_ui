@@ -93,6 +93,7 @@ RoundButton {
 	textTop: pixels;
 
 	icon: icon;
+	iconOver: icon;
 	iconPosition: point;
 
 	font: font;
@@ -135,6 +136,7 @@ Radio {
 	toggledFg: color;
 	diameter: pixels;
 	thickness: pixels;
+	outerSkip: pixels;
 	skip: pixels;
 	duration: int;
 	rippleAreaPadding: pixels;
@@ -406,6 +408,18 @@ CrossLineAnimation {
 	startPosition: point;
 	endPosition: point;
 	stroke: pixels;
+}
+
+ArcsAnimation {
+	fg: color;
+	stroke: pixels;
+	space: pixels;
+	duration: int;
+	deltaAngle: int;
+	deltaHeight: pixels;
+	deltaWidth: pixels;
+	startHeight: pixels;
+	startWidth: pixels;
 }
 
 MultiSelectItem {
@@ -748,7 +762,8 @@ defaultRadio: Radio {
 	toggledFg: windowBgActive;
 	diameter: 22px;
 	thickness: 2px;
-	skip: 65px; // * 0.1
+	outerSkip: 10px; // * 0.1
+	skip: 60px; // * 0.1
 	duration: 120;
 	rippleAreaPadding: 8px;
 }

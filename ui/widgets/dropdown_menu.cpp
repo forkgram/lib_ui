@@ -12,7 +12,7 @@ namespace Ui {
 
 DropdownMenu::DropdownMenu(QWidget *parent, const style::DropdownMenu &st) : InnerDropdown(parent, st.wrap)
 , _st(st) {
-	_menu = setOwnedWidget(object_ptr<Menu>(this, _st.menu));
+	_menu = setOwnedWidget(object_ptr<Menu::Menu>(this, _st.menu));
 	init();
 }
 
@@ -33,12 +33,15 @@ DropdownMenu::DropdownMenu(QWidget *parent, const style::DropdownMenu &st) : Inn
 void DropdownMenu::init() {
 	InnerDropdown::setHiddenCallback([this] { hideFinish(); });
 
-	_menu->setResizedCallback([this] { resizeToContent(); });
-	_menu->setActivatedCallback([this](QAction *action, int actionTop, TriggeredSource source) {
-		handleActivated(action, actionTop, source);
+	_menu->resizesFromInner(
+	) | rpl::start_with_next([=] {
+		resizeToContent();
+	}, _menu->lifetime());
+	_menu->setActivatedCallback([this](const Menu::CallbackData &data) {
+		handleActivated(data);
 	});
-	_menu->setTriggeredCallback([this](QAction *action, int actionTop, TriggeredSource source) {
-		handleTriggered(action, actionTop, source);
+	_menu->setTriggeredCallback([this](const Menu::CallbackData &data) {
+		handleTriggered(data);
 	});
 	_menu->setKeyPressDelegate([this](int key) { return handleKeyPress(key); });
 	_menu->setMouseMoveDelegate([this](QPoint globalPosition) { handleMouseMove(globalPosition); });
@@ -50,8 +53,9 @@ void DropdownMenu::init() {
 	hide();
 }
 
-not_null<QAction*> DropdownMenu::addAction(const QString &text, const QObject *receiver, const char* member, const style::icon *icon, const style::icon *iconOver) {
-	return _menu->addAction(text, receiver, member, icon, iconOver);
+not_null<QAction*> DropdownMenu::addAction(
+		base::unique_qptr<Menu::ItemBase> widget) {
+	return _menu->addAction(std::move(widget));
 }
 
 not_null<QAction*> DropdownMenu::addAction(const QString &text, Fn<void()> callback, const style::icon *icon, const style::icon *iconOver) {
@@ -73,9 +77,13 @@ const std::vector<not_null<QAction*>> &DropdownMenu::actions() const {
 	return _menu->actions();
 }
 
-void DropdownMenu::handleActivated(QAction *action, int actionTop, TriggeredSource source) {
-	if (source == TriggeredSource::Mouse) {
-		if (!popupSubmenuFromAction(action, actionTop, source)) {
+bool DropdownMenu::empty() const {
+	return _menu->empty();
+}
+
+void DropdownMenu::handleActivated(const Menu::CallbackData &data) {
+	if (data.source == TriggeredSource::Mouse) {
+		if (!popupSubmenuFromAction(data)) {
 			if (auto currentSubmenu = base::take(_activeSubmenu)) {
 				currentSubmenu->hideMenu(true);
 			}
@@ -83,11 +91,11 @@ void DropdownMenu::handleActivated(QAction *action, int actionTop, TriggeredSour
 	}
 }
 
-void DropdownMenu::handleTriggered(QAction *action, int actionTop, TriggeredSource source) {
-	if (!popupSubmenuFromAction(action, actionTop, source)) {
+void DropdownMenu::handleTriggered(const Menu::CallbackData &data) {
+	if (!popupSubmenuFromAction(data)) {
 		hideMenu();
 		_triggering = true;
-		emit action->trigger();
+		emit data.action->trigger();
 		_triggering = false;
 		if (_deleteLater) {
 			_deleteLater = false;
@@ -97,7 +105,7 @@ void DropdownMenu::handleTriggered(QAction *action, int actionTop, TriggeredSour
 }
 
 // Not ready with submenus yet.
-bool DropdownMenu::popupSubmenuFromAction(QAction *action, int actionTop, TriggeredSource source) {
+bool DropdownMenu::popupSubmenuFromAction(const Menu::CallbackData &data) {
 	//if (auto submenu = _submenus.value(action)) {
 	//	if (_activeSubmenu == submenu) {
 	//		submenu->hideMenu(true);
@@ -126,9 +134,9 @@ bool DropdownMenu::popupSubmenuFromAction(QAction *action, int actionTop, Trigge
 //	}
 //}
 
-void DropdownMenu::forwardKeyPress(int key) {
-	if (!handleKeyPress(key)) {
-		_menu->handleKeyPress(key);
+void DropdownMenu::forwardKeyPress(not_null<QKeyEvent*> e) {
+	if (!handleKeyPress(e->key())) {
+		_menu->handleKeyPress(e);
 	}
 }
 
@@ -185,7 +193,7 @@ void DropdownMenu::hideEvent(QHideEvent *e) {
 }
 
 void DropdownMenu::keyPressEvent(QKeyEvent *e) {
-	forwardKeyPress(e->key());
+	forwardKeyPress(e);
 }
 
 void DropdownMenu::mouseMoveEvent(QMouseEvent *e) {
