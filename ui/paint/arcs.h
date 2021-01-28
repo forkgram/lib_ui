@@ -53,7 +53,11 @@ public:
 	bool isFinished() const;
 
 	float width() const;
+	float maxWidth() const;
+	float finishedWidth() const;
 	float height() const;
+
+	void setStrokeRatio(float ratio);
 
 private:
 	struct Arc {
@@ -80,6 +84,7 @@ private:
 	const QRectF _emptyRect;
 
 	float64 _currentValue = 0.;
+	float _strokeRatio = 0.;
 
 	rpl::event_stream<> _startUpdateRequests;
 	rpl::event_stream<> _stopUpdateRequests;

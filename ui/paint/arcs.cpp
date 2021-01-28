@@ -153,6 +153,30 @@ float ArcsAnimation::width() const {
 	if (_arcs.empty()) {
 		return 0;
 	}
+	for (const auto &arc : ranges::view::reverse(_arcs)) {
+		if ((arc.progress != 1.)) {
+			return arc.rect.x() + arc.rect.width();
+		}
+	}
+	return 0;
+}
+
+float ArcsAnimation::finishedWidth() const {
+	if (_arcs.empty()) {
+		return 0;
+	}
+	for (const auto &arc : ranges::view::reverse(_arcs)) {
+		if (arc.threshold <= _currentValue) {
+			return arc.rect.x() + arc.rect.width();
+		}
+	}
+	return 0;
+}
+
+float ArcsAnimation::maxWidth() const {
+	if (_arcs.empty()) {
+		return 0;
+	}
 	const auto &r = _arcs.back().rect;
 	return r.x() + r.width();
 }
@@ -185,7 +209,11 @@ bool ArcsAnimation::isArcFinished(const Arc &arc) const {
 void ArcsAnimation::paint(Painter &p, std::optional<QColor> colorOverride) {
 	PainterHighQualityEnabler hq(p);
 	QPen pen;
-	pen.setWidth(_st.stroke);
+	if (_strokeRatio) {
+		pen.setWidthF(_st.stroke * _strokeRatio);
+	} else {
+		pen.setWidth(_st.stroke);
+	}
 	pen.setCapStyle(Qt::RoundCap);
 	pen.setColor(colorOverride ? (*colorOverride) : _st.fg->c);
 	p.setPen(pen);
@@ -204,5 +232,8 @@ void ArcsAnimation::paint(Painter &p, std::optional<QColor> colorOverride) {
 	}
 }
 
+void ArcsAnimation::setStrokeRatio(float ratio) {
+	_strokeRatio = ratio;
+}
 
 } // namespace Ui::Paint
