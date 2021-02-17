@@ -6,9 +6,10 @@
 //
 #include "ui/platform/win/ui_utility_win.h"
 
-#include <QtWidgets/QApplication>
-
 #include "base/platform/win/base_windows_h.h"
+
+#include <QtWidgets/QApplication>
+#include <QtGui/QWindow>
 
 namespace Ui {
 namespace Platform {
@@ -42,6 +43,29 @@ void IgnoreAllActivation(not_null<QWidget*> widget) {
 		GWL_EXSTYLE,
 		style | WS_EX_NOACTIVATE | WS_EX_APPWINDOW);
 	ShowWindow(handle, SW_SHOW);
+}
+
+bool ShowWindowMenu(QWindow *window) {
+	const auto pos = QCursor::pos();
+
+	SendMessage(
+		HWND(window->winId()),
+		WM_SYSCOMMAND,
+		SC_MOUSEMENU,
+		MAKELPARAM(pos.x(), pos.y()));
+
+	return true;
+}
+
+TitleControls::Layout TitleControlsLayout() {
+	return TitleControls::Layout{
+		.right = {
+			TitleControls::Control::Minimize,
+			TitleControls::Control::Maximize,
+			TitleControls::Control::Close,
+			TitleControls::Control::OnTop,
+		}
+	};
 }
 
 } // namespace Platform

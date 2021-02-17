@@ -39,10 +39,11 @@ private:
 	const style::CrossLineAnimation &_st;
 	const bool _reversed;
 	const QPen _transparentPen;
-	const QPen _strokePen;
+	QPen _strokePen;
 	QLineF _line;
 	QImage _frame;
 	QImage _completeCross;
+	QImage _completeCrossOverride;
 
 };
 

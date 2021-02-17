@@ -58,7 +58,15 @@ public:
 
 	void clearState() override;
 
-	void paintRipple(QPainter &p, int x, int y, const QColor *colorOverride = nullptr);
+	void paintRipple(
+		QPainter &p,
+		const QPoint &point,
+		const QColor *colorOverride = nullptr);
+	void paintRipple(
+		QPainter &p,
+		int x,
+		int y,
+		const QColor *colorOverride = nullptr);
 
 	void finishAnimating();
 
@@ -86,6 +94,7 @@ public:
 
 	void setText(const QString &text);
 	void setWidth(int w);
+	void setColorOverride(std::optional<QColor> color);
 	void setTextMargins(QMargins margins);
 
 	int32 textWidth() const;
@@ -99,6 +108,7 @@ private:
 	QString _text;
 	QMargins _textMargins;
 	int _width = 0;
+	std::optional<QColor> _colorOverride;
 
 	const style::FlatButton &_st;
 

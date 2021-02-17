@@ -120,6 +120,13 @@ void RippleButton::setForceRippled(
 	update();
 }
 
+void RippleButton::paintRipple(
+		QPainter &p,
+		const QPoint &point,
+		const QColor *colorOverride) {
+	paintRipple(p, point.x(), point.y(), colorOverride);
+}
+
 void RippleButton::paintRipple(QPainter &p, int x, int y, const QColor *colorOverride) {
 	if (_ripple) {
 		_ripple->paint(p, x, y, width(), colorOverride);
@@ -199,6 +206,11 @@ void FlatButton::setWidth(int w) {
 	resize(_width, height());
 }
 
+void FlatButton::setColorOverride(std::optional<QColor> color) {
+	_colorOverride = color;
+	update();
+}
+
 int32 FlatButton::textWidth() const {
 	return _st.font->width(_text);
 }
@@ -218,7 +230,11 @@ void FlatButton::paintEvent(QPaintEvent *e) {
 
 	p.setFont(isOver() ? _st.overFont : _st.font);
 	p.setRenderHint(QPainter::TextAntialiasing);
-	p.setPen(isOver() ? _st.overColor : _st.color);
+	if (_colorOverride) {
+		p.setPen(*_colorOverride);
+	} else {
+		p.setPen(isOver() ? _st.overColor : _st.color);
+	}
 
 	const auto textRect = inner.marginsRemoved(
 		_textMargins
@@ -365,7 +381,7 @@ void RoundButton::paintEvent(QPaintEvent *e) {
 		drawRect(_roundRectOver);
 	}
 
-	paintRipple(p, rounded.x(), rounded.y());
+	paintRipple(p, rounded.topLeft());
 
 	p.setFont(_st.font);
 	const auto textTop = _st.padding.top() + _st.textTop;
@@ -438,7 +454,7 @@ void IconButton::setRippleColorOverride(const style::color *colorOverride) {
 void IconButton::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	paintRipple(p, _st.rippleAreaPosition.x(), _st.rippleAreaPosition.y(), _rippleColorOverride ? &(*_rippleColorOverride)->c : nullptr);
+	paintRipple(p, _st.rippleAreaPosition, _rippleColorOverride ? &(*_rippleColorOverride)->c : nullptr);
 
 	auto down = isDown();
 	auto overIconOpacity = (down || forceRippled()) ? 1. : _a_over.value(isOver() ? 1. : 0.);
@@ -554,7 +570,7 @@ void CrossButton::paintEvent(QPaintEvent *e) {
 	auto shown = _showAnimation.value(_shown ? 1. : 0.);
 	p.setOpacity(shown);
 
-	paintRipple(p, _st.crossPosition.x(), _st.crossPosition.y());
+	paintRipple(p, _st.crossPosition);
 
 	auto loading = 0.;
 	if (_loadingAnimation.animating()) {
