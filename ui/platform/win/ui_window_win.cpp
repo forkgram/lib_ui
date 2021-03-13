@@ -206,6 +206,7 @@ void WindowHelper::init() {
 	style::PaletteChanged(
 	) | rpl::start_with_next([=] {
 		_shadow.setColor(st::windowShadowFg->c);
+		Ui::ForceFullRepaint(window());
 	}, window()->lifetime());
 
 	rpl::combine(
@@ -350,7 +351,7 @@ bool WindowHelper::handleNativeEvent(
 				} else if (wParam == SIZE_MINIMIZED) {
 					state = Qt::WindowMinimized;
 				}
-				emit window()->windowHandle()->windowStateChanged(state);
+				window()->windowHandle()->windowStateChanged(state);
 			}
 			updateMargins();
 			const auto changes = (wParam == SIZE_MINIMIZED

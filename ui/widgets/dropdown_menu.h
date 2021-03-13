@@ -27,8 +27,12 @@ public:
 		_hiddenCallback = std::move(callback);
 	}
 
-	const std::vector<not_null<QAction*>> &actions() const;
-	bool empty() const;
+	[[nodiscard]] const std::vector<not_null<QAction*>> &actions() const;
+	[[nodiscard]] bool empty() const;
+
+	[[nodiscard]] not_null<Menu::Menu*> menu() const {
+		return _menu;
+	}
 
 	~DropdownMenu();
 
@@ -39,7 +43,7 @@ protected:
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 
-private slots:
+private Q_SLOTS:
 	void onHidden() {
 		hideFinish();
 	}

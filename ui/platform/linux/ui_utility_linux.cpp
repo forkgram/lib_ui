@@ -32,10 +32,6 @@ namespace {
 
 constexpr auto kXCBFrameExtentsAtomName = "_GTK_FRAME_EXTENTS"_cs;
 
-constexpr auto kXDGDesktopPortalService = "org.freedesktop.portal.Desktop"_cs;
-constexpr auto kXDGDesktopPortalObjectPath = "/org/freedesktop/portal/desktop"_cs;
-constexpr auto kSettingsPortalInterface = "org.freedesktop.portal.Settings"_cs;
-
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 bool SetXCBFrameExtents(QWindow *window, const QMargins &extents) {
 	const auto connection = base::Platform::XCB::GetConnectionFromQt();
@@ -247,16 +243,27 @@ bool UnsetWindowExtents(QWindow *window) {
 bool ShowWindowMenu(QWindow *window) {
 	if (const auto integration = WaylandIntegration::Instance()) {
 		return integration->showWindowMenu(window);
-	} else {
+	} else if (::Platform::IsX11()) {
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 		return ShowXCBWindowMenu(window);
 #else // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 		return false;
 #endif // DESKTOP_APP_DISABLE_X11_INTEGRATION
 	}
+
+	return false;
 }
 
 TitleControls::Layout TitleControlsLayout() {
+	if (static auto Once = false; !std::exchange(Once, true)) {
+		const auto integration = base::Platform::GtkIntegration::Instance();
+		if (integration && integration->checkVersion(3, 12, 0)) {
+			integration->connectToSetting(
+				"gtk-decoration-layout",
+				NotifyTitleControlsLayoutChanged);
+		}
+	}
+
 	const auto gtkResult = []() -> std::optional<TitleControls::Layout> {
 		const auto integration = base::Platform::GtkIntegration::Instance();
 		if (!integration || !integration->checkVersion(3, 12, 0)) {
@@ -265,7 +272,7 @@ TitleControls::Layout TitleControlsLayout() {
 
 		const auto decorationLayoutSetting = integration->getStringSetting(
 			"gtk-decoration-layout");
-		
+
 		if (!decorationLayoutSetting.has_value()) {
 			return std::nullopt;
 		}
