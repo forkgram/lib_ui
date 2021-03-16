@@ -340,7 +340,7 @@ void TitleControls::updateButtonsState() {
 
 DefaultTitleWidget::DefaultTitleWidget(not_null<RpWidget*> parent)
 : RpWidget(parent)
-, _controls(this, st::defaultWindowTitle)
+, _controls(this, st::defaultWindowTitle, nullptr, true)
 , _shadow(this, st::titleShadow) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 }

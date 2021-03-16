@@ -286,6 +286,7 @@ TitleControls::Layout TitleControlsLayout() {
 			GtkKeywordToTitleControl);
 
 		std::vector<TitleControls::Control> controlsRight;
+		controlsRight.push_back(TitleControls::Control::OnTop);
 		if (decorationLayout.size() > 1) {
 			ranges::transform(
 				decorationLayout[1].split(','),
