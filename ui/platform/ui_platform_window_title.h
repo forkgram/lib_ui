@@ -56,6 +56,7 @@ private:
 	[[nodiscard]] Ui::IconButton *controlWidget(Control control) const;
 
 	void init(Fn<void(bool maximized)> maximize);
+	void subscribeToStateChanges();
 	void updateButtonsState();
 	void updateControlsPosition();
 	void updateControlsPositionBySide(
