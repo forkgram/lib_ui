@@ -35,14 +35,10 @@ public:
 	virtual void registerLeaveSubscription(not_null<QWidget*> widget) = 0;
 	virtual void unregisterLeaveSubscription(not_null<QWidget*> widget) = 0;
 
-	virtual void writeLogEntry(const QString &entry) = 0;
 	[[nodiscard]] virtual QString emojiCacheFolder() = 0;
 
 	virtual void textActionsUpdated();
 	virtual void activationFromTopPanel();
-
-	virtual void startFontsBegin();
-	virtual void startFontsEnd();
 
 	[[nodiscard]] virtual QString timeFormat();
 

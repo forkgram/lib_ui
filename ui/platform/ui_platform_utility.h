@@ -28,6 +28,11 @@ void UpdateOverlayed(not_null<QWidget*> widget);
 void ShowOverAll(not_null<QWidget*> widget, bool canFocus = true);
 void BringToBack(not_null<QWidget*> widget);
 void IgnoreAllActivation(not_null<QWidget*> widget);
+void ClearTransientParent(not_null<QWidget*> widget);
+
+[[nodiscard]] std::optional<bool> IsOverlapped(
+    not_null<QWidget*> widget,
+    const QRect &rect);
 
 [[nodiscard]] constexpr bool UseMainQueueGeneric();
 void DrainMainQueue(); // Needed only if UseMainQueueGeneric() is false.
