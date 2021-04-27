@@ -701,8 +701,8 @@ defaultScrollArea: ScrollArea {
 	deltat: 3px;
 	deltab: 3px;
 
-	topsh: 2px;
-	bottomsh: 2px;
+	topsh: 0px;
+	bottomsh: 0px;
 	shColor: shadowFg;
 
 	duration: 150;
@@ -714,9 +714,6 @@ defaultSolidScroll: ScrollArea(defaultScrollArea) {
 	width: 14px;
 	deltat: 6px;
 	deltab: 6px;
-
-	topsh: 0px;
-	bottomsh: 0px;
 
 	hiding: 0;
 }
@@ -1427,55 +1424,6 @@ defaultToast: Toast {
 	durationFadeIn: 200;
 	durationFadeOut: 1000;
 	durationSlide: 160;
-}
-
-callMuteMainBlobMinRadius: 57px;
-callMuteMainBlobMaxRadius: 63px;
-callMuteMinorBlobMinRadius: 64px;
-callMuteMinorBlobMaxRadius: 74px;
-callMuteMajorBlobMinRadius: 67px;
-callMuteMajorBlobMaxRadius: 77px;
-
-callMuteButtonActiveInner: IconButton {
-	width: 136px;
-	height: 165px;
-}
-callMuteButtonLabel: FlatLabel(defaultFlatLabel) {
-	textFg: groupCallMembersFg;
-	style: TextStyle(defaultTextStyle) {
-		font: font(14px);
-		linkFont: font(14px);
-		linkFontOver: font(14px underline);
-	}
-}
-callMuteButtonSublabel: FlatLabel(defaultFlatLabel) {
-	textFg: groupCallMemberNotJoinedStatus;
-}
-callMuteButtonLabelsSkip: 5px;
-callMuteButtonSublabelSkip: 19px;
-callMuteButtonActive: CallButton {
-	button: callMuteButtonActiveInner;
-	bg: groupCallLive1;
-	bgSize: 100px;
-	bgPosition: point(18px, 18px);
-	outerRadius: 18px;
-	outerBg: callAnswerBgOuter;
-	label: callMuteButtonLabel;
-}
-callMuteButtonMuted: CallButton(callMuteButtonActive) {
-	bg: groupCallMuted1;
-	label: callMuteButtonLabel;
-}
-callMuteButtonConnecting: CallButton(callMuteButtonMuted) {
-	bg: callIconBg;
-	label: callMuteButtonLabel;
-}
-callMuteButtonLabelAdditional: 5px;
-
-callConnectingRadial: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
-	color: lightButtonFg;
-	thickness: 4px;
-	size: size(100px, 100px);
 }
 
 shakeShift: 4px;
