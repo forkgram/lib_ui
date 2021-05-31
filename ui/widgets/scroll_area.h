@@ -125,9 +125,10 @@ private:
 	QRect _bar;
 };
 
-class ScrollArea : public RpWidgetWrap<QScrollArea> {
+class ScrollArea : public RpWidgetBase<QScrollArea> {
 	Q_OBJECT
 
+	using Parent = RpWidgetBase<QScrollArea>;
 public:
 	ScrollArea(QWidget *parent, const style::ScrollArea &st = st::defaultScrollArea, bool handleTouch = true);
 
@@ -200,8 +201,8 @@ protected:
 	void scrollContentsBy(int dx, int dy) override;
 
 private:
-	void doSetOwnedWidget(object_ptr<TWidget> widget);
-	object_ptr<TWidget> doTakeWidget();
+	void doSetOwnedWidget(object_ptr<QWidget> widget);
+	object_ptr<QWidget> doTakeWidget();
 
 	void setWidget(QWidget *widget);
 
@@ -239,7 +240,7 @@ private:
 
 	bool _widgetAcceptsTouch = false;
 
-	object_ptr<TWidget> _widget = { nullptr };
+	object_ptr<QWidget> _widget = { nullptr };
 
 	rpl::event_stream<int> _scrollTopUpdated;
 

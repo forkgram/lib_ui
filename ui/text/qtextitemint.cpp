@@ -4,7 +4,6 @@
 // For license and copyright information please follow this link:
 // https://github.com/desktop-app/legal/blob/master/LEGAL
 //
-#ifdef DESKTOP_APP_USE_PACKAGED
 #include <private/qtextengine_p.h>
 
 QTextItemInt::QTextItemInt(
@@ -14,13 +13,9 @@ QTextItemInt::QTextItemInt(
 	int numChars,
 	QFontEngine *fe,
 	const QTextCharFormat &format)
-: flags(0)
-, justified(false)
-, underlineStyle(QTextCharFormat::NoUnderline)
-, charFormat(format)
+: charFormat(format)
 , num_chars(numChars)
 , chars(chars_)
-, logClusters(0)
 , f(font)
 , glyphs(g)
 , fontEngine(fe) {
@@ -29,7 +24,7 @@ QTextItemInt::QTextItemInt(
 void QTextItemInt::initWithScriptItem(const QScriptItem &si) {
 	// explicitly initialize flags so that initFontAttributes can be called
 	// multiple times on the same TextItem
-	flags = 0;
+	flags = { };
 	if (si.analysis.bidiLevel %2)
 		flags |= QTextItem::RightToLeft;
 	ascent = si.ascent;
@@ -51,4 +46,3 @@ void QTextItemInt::initWithScriptItem(const QScriptItem &si) {
 	if (f->d->strikeOut || charFormat.fontStrikeOut())
 		flags |= QTextItem::StrikeOut;
 }
-#endif // !DESKTOP_APP_USE_PACKAGED

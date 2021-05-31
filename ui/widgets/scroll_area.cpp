@@ -272,7 +272,7 @@ void ScrollBar::resizeEvent(QResizeEvent *e) {
 }
 
 ScrollArea::ScrollArea(QWidget *parent, const style::ScrollArea &st, bool handleTouch)
-: RpWidgetWrap<QScrollArea>(parent)
+: Parent(parent)
 , _st(st)
 , _horizontalBar(this, false, &_st)
 , _verticalBar(this, true, &_st)
@@ -681,7 +681,7 @@ void ScrollArea::scrollToY(int toTop, int toBottom) {
 	verticalScrollBar()->setValue(scToTop);
 }
 
-void ScrollArea::doSetOwnedWidget(object_ptr<TWidget> w) {
+void ScrollArea::doSetOwnedWidget(object_ptr<QWidget> w) {
 	if (widget() && _touchEnabled) {
 		widget()->removeEventFilter(this);
 		if (!_widgetAcceptsTouch) widget()->setAttribute(Qt::WA_AcceptTouchEvents, false);
@@ -698,7 +698,7 @@ void ScrollArea::doSetOwnedWidget(object_ptr<TWidget> w) {
 	}
 }
 
-object_ptr<TWidget> ScrollArea::doTakeWidget() {
+object_ptr<QWidget> ScrollArea::doTakeWidget() {
 	QScrollArea::takeWidget();
 	return std::move(_widget);
 }
