@@ -30,7 +30,7 @@ public:
 private:
 	void initializeGL() override;
 	void resizeGL(int w, int h) override;
-	void paintGL() override;
+	void paintEvent(QPaintEvent *e) override;
 	void callDeInit();
 
 	const std::unique_ptr<Renderer> _renderer;
@@ -78,8 +78,22 @@ void SurfaceOpenGL::resizeGL(int w, int h) {
 	_renderer->resize(this, *context()->functions(), w, h);
 }
 
-void SurfaceOpenGL::paintGL() {
-	_renderer->paint(this, *context()->functions());
+void SurfaceOpenGL::paintEvent(QPaintEvent *e) {
+	if (!updatesEnabled() || size().isEmpty() || !isValid()) {
+		return;
+	}
+	makeCurrent();
+	const auto f = context()->functions();
+	if (const auto bg = _renderer->clearColor()) {
+		f->glClearColor(bg->redF(), bg->greenF(), bg->blueF(), bg->alphaF());
+		f->glClear(GL_COLOR_BUFFER_BIT);
+	}
+	f->glViewport(
+		0,
+		0,
+		width() * devicePixelRatio(),
+		height() * devicePixelRatio());
+	_renderer->paint(this, *f);
 }
 
 void SurfaceOpenGL::callDeInit() {
@@ -114,9 +128,24 @@ void Renderer::paint(
 }
 
 std::unique_ptr<RpWidgetWrap> CreateSurface(
-		QWidget *parent,
 		Fn<ChosenRenderer(Capabilities)> chooseRenderer) {
-	auto chosen = chooseRenderer(CheckCapabilities(parent));
+	auto chosen = chooseRenderer(CheckCapabilities(nullptr));
+	switch (chosen.backend) {
+	case Backend::OpenGL:
+		return std::make_unique<SurfaceOpenGL>(
+			nullptr,
+			std::move(chosen.renderer));
+	case Backend::Raster:
+		return std::make_unique<SurfaceRaster>(
+			nullptr,
+			std::move(chosen.renderer));
+	}
+	Unexpected("Backend value in Ui::GL::CreateSurface.");
+}
+
+std::unique_ptr<RpWidgetWrap> CreateSurface(
+		QWidget *parent,
+		ChosenRenderer chosen) {
 	switch (chosen.backend) {
 	case Backend::OpenGL:
 		return std::make_unique<SurfaceOpenGL>(

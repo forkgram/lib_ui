@@ -20,16 +20,17 @@ QVector4D Uniform(const Rect &rect) {
 	return QVector4D(rect.x(), rect.y(), rect.width(), rect.height());
 }
 
-QVector4D Uniform(const QColor &color) {
-	return QVector4D(
-		color.redF(),
-		color.greenF(),
-		color.blueF(),
-		color.alphaF());
-}
-
 QSizeF Uniform(QSize size) {
 	return size;
+}
+
+Rect TransformRect(const Rect &raster, QSize viewport, float factor) {
+	return {
+		raster.left() * factor,
+		float(viewport.height() - raster.bottom()) * factor,
+		raster.width() * factor,
+		raster.height() * factor,
+	};
 }
 
 } // namespace Ui::GL

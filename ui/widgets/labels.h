@@ -6,14 +6,14 @@
 //
 #pragma once
 
+#include "base/timer.h"
+#include "base/unique_qptr.h"
 #include "ui/rp_widget.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/text/text.h"
 #include "ui/click_handler.h"
 #include "ui/widgets/box_content_divider.h"
 #include "styles/style_widgets.h"
-
-#include <QtCore/QTimer>
 
 class QTouchEvent;
 
@@ -94,7 +94,6 @@ private:
 };
 
 class FlatLabel : public RpWidget, public ClickHandlerHost {
-	Q_OBJECT
 
 public:
 	FlatLabel(QWidget *parent, const style::FlatLabel &st = st::defaultFlatLabel);
@@ -166,14 +165,12 @@ protected:
 
 	int resizeGetHeight(int newWidth) override;
 
-private Q_SLOTS:
-	void onCopySelectedText();
-	void onCopyContextText();
+	void copySelectedText();
+	void copyContextText();
 
-	void onTouchSelect();
-	void onContextMenuDestroy(QObject *obj);
+	void touchSelect();
 
-	void onExecuteDrag();
+	void executeDrag();
 
 private:
 	void init();
@@ -227,9 +224,9 @@ private:
 	QPoint _lastMousePos;
 
 	QPoint _trippleClickPoint;
-	QTimer _trippleClickTimer;
+	base::Timer _trippleClickTimer;
 
-	PopupMenu *_contextMenu = nullptr;
+	base::unique_qptr<PopupMenu> _contextMenu;
 	QString _contextCopyText;
 
 	ClickHandlerFilter _clickHandlerFilter;
@@ -238,7 +235,7 @@ private:
 	bool _touchSelect = false;
 	bool _touchInProgress = false;
 	QPoint _touchStart, _touchPrevPos, _touchPos;
-	QTimer _touchSelectTimer;
+	base::Timer _touchSelectTimer;
 
 };
 

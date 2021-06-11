@@ -13,7 +13,11 @@
 namespace Ui::GL {
 namespace details {
 
-void GenerateTextures(QOpenGLFunctions &f, gsl::span<GLuint> values);
+void GenerateTextures(
+	QOpenGLFunctions &f,
+	gsl::span<GLuint> values,
+	GLint filter,
+	GLint clamp);
 void DestroyTextures(QOpenGLFunctions &f, gsl::span<GLuint> values);
 
 void GenerateFramebuffers(QOpenGLFunctions &f, gsl::span<GLuint> values);
@@ -26,9 +30,16 @@ class Textures final {
 public:
 	static_assert(Count > 0);
 
-	void ensureCreated(QOpenGLFunctions &f) {
+	void ensureCreated(
+			QOpenGLFunctions &f,
+			GLint filter = GL_LINEAR,
+			GLint clamp = GL_CLAMP_TO_EDGE) {
 		if (!created()) {
-			details::GenerateTextures(f, gsl::make_span(_values));
+			details::GenerateTextures(
+				f,
+				gsl::make_span(_values),
+				filter,
+				clamp);
 		}
 	}
 	void destroy(QOpenGLFunctions &f) {
@@ -101,7 +112,7 @@ public:
 	[[nodiscard]] QImage takeImage();
 	void invalidate();
 
-	void bind(QOpenGLFunctions &f);
+	void bind(QOpenGLFunctions &f, QSize subimage = QSize());
 	void destroy(QOpenGLFunctions &f);
 
 	[[nodiscard]] TexturedRect texturedRect(
@@ -116,9 +127,9 @@ public:
 private:
 	QImage _image;
 	QImage _storage;
-	Textures<2> _textures;
+	Textures<1> _textures;
 	qint64 _cacheKey = 0;
-	int _index = 0;
+	QSize _textureSize;
 
 };
 

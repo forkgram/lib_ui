@@ -6,6 +6,7 @@
 //
 #include "ui/widgets/labels.h"
 
+#include "base/invoke_queued.h"
 #include "ui/text/text_entity.h"
 #include "ui/effects/animation_value.h"
 #include "ui/widgets/popup_menu.h"
@@ -229,7 +230,8 @@ FlatLabel::FlatLabel(
 	const style::FlatLabel &st)
 : RpWidget(parent)
 , _text(st.minWidth ? st.minWidth : QFIXED_MAX)
-, _st(st) {
+, _st(st)
+, _touchSelectTimer([=] { touchSelect(); }) {
 	textUpdated();
 	std::move(
 		text
@@ -241,11 +243,6 @@ FlatLabel::FlatLabel(
 
 void FlatLabel::init() {
 	_contextCopyText = Integration::Instance().phraseContextCopyText();
-
-	_trippleClickTimer.setSingleShot(true);
-
-	_touchSelectTimer.setSingleShot(true);
-	connect(&_touchSelectTimer, SIGNAL(timeout()), this, SLOT(onTouchSelect()));
 }
 
 void FlatLabel::textUpdated() {
@@ -405,7 +402,7 @@ Text::StateResult FlatLabel::dragActionStart(const QPoint &p, Qt::MouseButton bu
 			_dragAction = Selecting;
 			_selectionType = TextSelectType::Paragraphs;
 			updateHover(state);
-			_trippleClickTimer.start(QApplication::doubleClickInterval());
+			_trippleClickTimer.callOnce(QApplication::doubleClickInterval());
 			update();
 		}
 	}
@@ -485,7 +482,7 @@ void FlatLabel::mouseDoubleClickEvent(QMouseEvent *e) {
 			mouseMoveEvent(e);
 
 			_trippleClickPoint = e->globalPos();
-			_trippleClickTimer.start(QApplication::doubleClickInterval());
+			_trippleClickTimer.callOnce(QApplication::doubleClickInterval());
 		}
 	}
 }
@@ -521,7 +518,7 @@ void FlatLabel::keyPressEvent(QKeyEvent *e) {
 	e->ignore();
 	if (e->key() == Qt::Key_Copy || (e->key() == Qt::Key_C && e->modifiers().testFlag(Qt::ControlModifier))) {
 		if (!_selection.empty()) {
-			onCopySelectedText();
+			copySelectedText();
 			e->accept();
 		}
 #ifdef Q_OS_MAC
@@ -558,7 +555,7 @@ void FlatLabel::touchEvent(QTouchEvent *e) {
 	if (e->type() == QEvent::TouchCancel) { // cancel
 		if (!_touchInProgress) return;
 		_touchInProgress = false;
-		_touchSelectTimer.stop();
+		_touchSelectTimer.cancel();
 		_touchSelect = false;
 		_dragAction = NoDrag;
 		return;
@@ -579,7 +576,7 @@ void FlatLabel::touchEvent(QTouchEvent *e) {
 		if (e->touchPoints().isEmpty()) return;
 
 		_touchInProgress = true;
-		_touchSelectTimer.start(QApplication::startDragTime());
+		_touchSelectTimer.callOnce(QApplication::startDragTime());
 		_touchSelect = false;
 		_touchStart = _touchPrevPos = _touchPos;
 	} break;
@@ -605,7 +602,7 @@ void FlatLabel::touchEvent(QTouchEvent *e) {
 			dragActionFinish(_touchPos, Qt::LeftButton);
 		}
 		if (weak) {
-			_touchSelectTimer.stop();
+			_touchSelectTimer.cancel();
 			_touchSelect = false;
 		}
 	} break;
@@ -613,11 +610,6 @@ void FlatLabel::touchEvent(QTouchEvent *e) {
 }
 
 void FlatLabel::showContextMenu(QContextMenuEvent *e, ContextMenuReason reason) {
-	if (_contextMenu) {
-		_contextMenu->deleteLater();
-		_contextMenu = nullptr;
-	}
-
 	if (e->reason() == QContextMenuEvent::Mouse) {
 		_lastMousePos = e->globalPos();
 	} else {
@@ -634,20 +626,20 @@ void FlatLabel::showContextMenu(QContextMenuEvent *e, ContextMenuReason reason) 
 	const auto fullSelection = _selectable
 		&& _text.isFullSelection(_selection);
 
-	_contextMenu = new PopupMenu(this);
+	_contextMenu = base::make_unique_q<PopupMenu>(this);
 
 	if (fullSelection && !_contextCopyText.isEmpty()) {
 		_contextMenu->addAction(
 			_contextCopyText,
-			[=] { onCopyContextText(); });
+			[=] { copyContextText(); });
 	} else if (uponSelection && !fullSelection) {
 		_contextMenu->addAction(
 			Integration::Instance().phraseContextCopySelected(),
-			[=] { onCopySelectedText(); });
+			[=] { copySelectedText(); });
 	} else if (_selectable && !hasSelection && !_contextCopyText.isEmpty()) {
 		_contextMenu->addAction(
 			_contextCopyText,
-			[=] { onCopyContextText(); });
+			[=] { copyContextText(); });
 	}
 
 	if (const auto link = ClickHandler::getActive()) {
@@ -661,39 +653,31 @@ void FlatLabel::showContextMenu(QContextMenuEvent *e, ContextMenuReason reason) 
 		}
 	}
 
-	if (_contextMenu->actions().empty()) {
-		delete _contextMenu;
+	if (_contextMenu->empty()) {
 		_contextMenu = nullptr;
 	} else {
-		connect(_contextMenu, SIGNAL(destroyed(QObject*)), this, SLOT(onContextMenuDestroy(QObject*)));
 		_contextMenu->popup(e->globalPos());
 		e->accept();
 	}
 }
 
-void FlatLabel::onCopySelectedText() {
+void FlatLabel::copySelectedText() {
 	const auto selection = _selection.empty() ? (_contextMenu ? _savedSelection : _selection) : _selection;
 	if (!selection.empty()) {
 		TextUtilities::SetClipboardText(_text.toTextForMimeData(selection));
 	}
 }
 
-void FlatLabel::onCopyContextText() {
+void FlatLabel::copyContextText() {
 	TextUtilities::SetClipboardText(_text.toTextForMimeData());
 }
 
-void FlatLabel::onTouchSelect() {
+void FlatLabel::touchSelect() {
 	_touchSelect = true;
 	dragActionStart(_touchPos, Qt::LeftButton);
 }
 
-void FlatLabel::onContextMenuDestroy(QObject *obj) {
-	if (obj == _contextMenu) {
-		_contextMenu = nullptr;
-	}
-}
-
-void FlatLabel::onExecuteDrag() {
+void FlatLabel::executeDrag() {
 	if (_dragAction != Dragging) return;
 
 	auto state = getTextState(_dragStartPosition);
@@ -770,7 +754,7 @@ Text::StateResult FlatLabel::dragActionUpdate() {
 
 	if (_dragAction == PrepareDrag && (m - _dragStartPosition).manhattanLength() >= QApplication::startDragDistance()) {
 		_dragAction = Dragging;
-		QTimer::singleShot(1, this, SLOT(onExecuteDrag()));
+		InvokeQueued(this, [=] { executeDrag(); });
 	}
 
 	return state;

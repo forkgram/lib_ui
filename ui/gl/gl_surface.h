@@ -19,11 +19,6 @@ class RpWidgetWrap;
 
 namespace Ui::GL {
 
-enum class Backend {
-    OpenGL,
-    Raster,
-};
-
 class Renderer {
 public:
     virtual void init(
@@ -47,6 +42,10 @@ public:
         not_null<QOpenGLWidget*> widget,
         QOpenGLFunctions &f);
 
+	[[nodiscard]] virtual std::optional<QColor> clearColor() {
+		return std::nullopt;
+	}
+
     virtual void paintFallback(
         Painter &&p,
         const QRegion &clip,
@@ -62,7 +61,10 @@ struct ChosenRenderer {
 };
 
 [[nodiscard]] std::unique_ptr<RpWidgetWrap> CreateSurface(
-    QWidget *parent,
     Fn<ChosenRenderer(Capabilities)> chooseRenderer);
+
+[[nodiscard]] std::unique_ptr<RpWidgetWrap> CreateSurface(
+	QWidget *parent,
+	ChosenRenderer chosen);
 
 } // namespace Ui::GL
