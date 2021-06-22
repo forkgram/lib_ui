@@ -42,6 +42,7 @@ const auto &kTagUnderline = InputField::kTagUnderline;
 const auto &kTagStrikeOut = InputField::kTagStrikeOut;
 const auto &kTagCode = InputField::kTagCode;
 const auto &kTagPre = InputField::kTagPre;
+const auto kTagCheckLinkMeta = QString("^:/:/:^");
 const auto kNewlineChars = QString("\r\n")
 	+ QChar(0xfdd0) // QTextBeginningOfFrame
 	+ QChar(0xfdd1) // QTextEndOfFrame
@@ -95,6 +96,71 @@ QVariant InputDocument::loadResource(int type, const QUrl &name) {
 
 bool IsNewline(QChar ch) {
 	return (kNewlineChars.indexOf(ch) >= 0);
+}
+
+[[nodiscard]] bool IsValidMarkdownLink(const QStringRef &link) {
+	return (link.indexOf('.') >= 0) || (link.indexOf(':') >= 0);
+}
+
+[[nodiscard]] QString CheckFullTextTag(
+		const TextWithTags &textWithTags,
+		const QString &tag) {
+	auto resultLink = QString();
+	const auto checkingLink = (tag == kTagCheckLinkMeta);
+	const auto &text = textWithTags.text;
+	const auto &tags = textWithTags.tags;
+	auto from = 0;
+	auto till = int(text.size());
+	const auto adjust = [&] {
+		for (; from != till; ++from) {
+			if (!IsNewline(text[from]) && !Text::IsSpace(text[from])) {
+				break;
+			}
+		}
+	};
+	for (const auto &existing : textWithTags.tags) {
+		adjust();
+		if (existing.offset > from) {
+			return QString();
+		}
+		auto found = false;
+		for (const auto &single : existing.id.splitRef('|')) {
+			const auto normalized = (single == kTagPre.midRef(0))
+				? kTagCode.midRef(0)
+				: single;
+			if (checkingLink && IsValidMarkdownLink(single)) {
+				if (resultLink.isEmpty()) {
+					resultLink = single.toString();
+					found = true;
+					break;
+				} else if (resultLink.midRef(0) == single) {
+					found = true;
+					break;
+				}
+				return QString();
+			} else if (!checkingLink && tag.midRef(0) == normalized) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			return QString();
+		}
+		from = std::clamp(existing.offset + existing.length, from, till);
+	}
+	while (till != from) {
+		if (!IsNewline(text[till - 1]) && !Text::IsSpace(text[till - 1])) {
+			break;
+		}
+		--till;
+	}
+	return (from < till) ? QString() : checkingLink ? resultLink : tag;
+}
+
+[[nodiscard]] bool HasFullTextTag(
+		const TextWithTags &textWithTags,
+		const QString &tag) {
+	return !CheckFullTextTag(textWithTags, tag).isEmpty();
 }
 
 QString GetFullSimpleTextTag(const TextWithTags &textWithTags) {
@@ -651,36 +717,33 @@ void RemoveDocumentTags(
 	cursor.mergeCharFormat(format);
 }
 
-bool IsValidMarkdownLink(const QString &link) {
-	return (link.indexOf('.') >= 0) || (link.indexOf(':') >= 0);
-}
-
 QTextCharFormat PrepareTagFormat(
 		const style::InputField &st,
 		QString tag) {
 	auto result = QTextCharFormat();
-	if (IsValidMarkdownLink(tag)) {
-		result.setForeground(st::defaultTextPalette.linkFg);
-		result.setFont(st.font);
-	} else if (tag == kTagBold) {
-		result.setForeground(st.textFg);
-		result.setFont(st.font->bold());
-	} else if (tag == kTagItalic) {
-		result.setForeground(st.textFg);
-		result.setFont(st.font->italic());
-	} else if (tag == kTagUnderline) {
-		result.setForeground(st.textFg);
-		result.setFont(st.font->underline());
-	} else if (tag == kTagStrikeOut) {
-		result.setForeground(st.textFg);
-		result.setFont(st.font->strikeout());
-	} else if (tag == kTagCode || tag == kTagPre) {
-		result.setForeground(st::defaultTextPalette.monoFg);
-		result.setFont(st.font->monospace());
-	} else {
-		result.setForeground(st.textFg);
-		result.setFont(st.font);
+	auto font = st.font;
+	auto color = std::optional<style::color>();
+	const auto applyOne = [&](const QStringRef &tag) {
+		if (IsValidMarkdownLink(tag)) {
+			color = st::defaultTextPalette.linkFg;
+		} else if (tag == kTagBold) {
+			font = font->bold();
+		} else if (tag == kTagItalic) {
+			font = font->italic();
+		} else if (tag == kTagUnderline) {
+			font = font->underline();
+		} else if (tag == kTagStrikeOut) {
+			font = font->strikeout();
+		} else if (tag == kTagCode || tag == kTagPre) {
+			color = st::defaultTextPalette.monoFg;
+			font = font->monospace();
+		}
+	};
+	for (const auto &tag : tag.splitRef('|')) {
+		applyOne(tag);
 	}
+	result.setFont(font);
+	result.setForeground(color.value_or(st.textFg));
 	result.setProperty(kTagProperty, tag);
 	return result;
 }
@@ -760,9 +823,9 @@ bool WasInsertTillTheEndOfTag(
 				return false;
 			}
 		}
+		block = block.next();
 		if (block.isValid()) {
 			fragmentIt = block.begin();
-			block = block.next();
 		} else {
 			break;
 		}
@@ -1992,6 +2055,7 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 	while (true) {
 		FormattingAction action;
 
+		auto checkedTill = insertPosition;
 		auto fromBlock = document->findBlock(insertPosition);
 		auto tillBlock = document->findBlock(insertEnd);
 		if (tillBlock.isValid()) tillBlock = tillBlock.next();
@@ -2001,8 +2065,13 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 				auto fragment = fragmentIt.fragment();
 				Assert(fragment.isValid());
 
-				int fragmentPosition = fragment.position();
-				if (insertPosition >= fragmentPosition + fragment.length()) {
+				const auto fragmentPosition = fragment.position();
+				const auto fragmentEnd = fragmentPosition + fragment.length();
+				if (insertPosition > fragmentEnd) {
+					// In case insertPosition == fragmentEnd we still
+					// need to fill startTagFound / breakTagOnNotLetter.
+					// This can happen if we inserted a newline after
+					// a text fragment with some formatting tag, like Bold.
 					continue;
 				}
 				int changedPositionInFragment = insertPosition - fragmentPosition; // Can be negative.
@@ -2122,6 +2191,7 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 				if (action.type != ActionType::Invalid) {
 					break;
 				}
+				checkedTill = fragmentEnd;
 			}
 			if (action.type != ActionType::Invalid) {
 				break;
@@ -2131,6 +2201,16 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 				action.intervalStart = block.next().position() - 1;
 				action.intervalEnd = action.intervalStart + 1;
 				break;
+			} else if (breakTagOnNotLetter) {
+				// In case we need to break on not letter and we didn't
+				// find any non letter symbol, we found it here - a newline.
+				breakTagOnNotLetter = false;
+				if (checkedTill < breakTagOnNotLetterTill) {
+					action.type = ActionType::RemoveTag;
+					action.intervalStart = checkedTill;
+					action.intervalEnd = breakTagOnNotLetterTill;
+					break;
+				}
 			}
 		}
 		if (action.type != ActionType::Invalid) {
@@ -2787,8 +2867,9 @@ auto InputField::selectionEditLinkData(EditLinkSelection selection) const
 		: selection.from;
 	const auto link = [&] {
 		return (position != selection.till)
-			? GetFullSimpleTextTag(
-				getTextWithTagsPart(position, selection.till))
+			? CheckFullTextTag(
+				getTextWithTagsPart(position, selection.till),
+				kTagCheckLinkMeta)
 			: QString();
 	}();
 	const auto simple = EditLinkData {
@@ -2844,6 +2925,10 @@ auto InputField::selectionEditLinkData(EditLinkSelection selection) const
 		const auto format = state.i.fragment().charFormat();
 		return format.property(kTagProperty).toString();
 	};
+	const auto stateTagHasLink = [&](const State &state) {
+		const auto tag = stateTag(state);
+		return (tag == link) || tag.splitRef('|').contains(link.midRef(0));
+	};
 	const auto stateStart = [&](const State &state) {
 		return state.i.fragment().position();
 	};
@@ -2863,14 +2948,14 @@ auto InputField::selectionEditLinkData(EditLinkSelection selection) const
 		} else if (fragmentStart >= selection.till) {
 			break;
 		}
-		if (stateTag(state) == link) {
+		if (stateTagHasLink(state)) {
 			auto start = fragmentStart;
 			auto finish = fragmentEnd;
 			auto copy = state;
-			while (moveToPrevious(copy) && (stateTag(copy) == link)) {
+			while (moveToPrevious(copy) && stateTagHasLink(copy)) {
 				start = stateStart(copy);
 			}
-			while (skipInvalid(state) && (stateTag(state) == link)) {
+			while (skipInvalid(state) && stateTagHasLink(state)) {
 				finish = stateEnd(state);
 				moveToNext(state);
 			}
@@ -3047,8 +3132,12 @@ void InputField::commitInstantReplacement(
 
 	auto cursor = textCursor();
 	if (checkIfInMonospace) {
-		const auto currentTag = cursor.charFormat().property(kTagProperty);
-		if (currentTag == kTagPre || currentTag == kTagCode) {
+		const auto currentTag = cursor.charFormat().property(
+			kTagProperty
+		).toString();
+		const auto currentTags = currentTag.splitRef('|');
+		if (currentTags.contains(kTagPre.midRef(0))
+			|| currentTags.contains(kTagCode.midRef(0))) {
 			return;
 		}
 	}
@@ -3188,7 +3277,90 @@ bool InputField::commitMarkdownReplacement(
 	return true;
 }
 
-bool InputField::IsValidMarkdownLink(const QString &link) {
+void InputField::addMarkdownTag(
+		int from,
+		int till,
+		const QString &tag) {
+	const auto current = getTextWithTagsPart(from, till);
+	const auto tagRef = tag.midRef(0);
+	auto markdownTagApplies = std::vector<MarkdownTag>();
+
+	// #TODO Trim inserted tag, so that all newlines are left outside.
+	auto tags = TagList();
+	auto filled = 0;
+	const auto add = [&](const TextWithTags::Tag &existing) {
+		const auto id = TextUtilities::TagWithAdded(existing.id, tag);
+		tags.push_back({ existing.offset, existing.length, id });
+		filled = std::clamp(
+			existing.offset + existing.length,
+			filled,
+			till - from);
+		markdownTagApplies.push_back({
+			from + existing.offset,
+			from + filled,
+			-1,
+			-1,
+			false,
+			id,
+		});
+	};
+	if (!TextUtilities::IsSeparateTag(tag)) {
+		for (const auto &existing : current.tags) {
+			if (existing.offset >= till) {
+				break;
+			} else if (existing.offset > filled) {
+				add({ filled, existing.offset - filled, tag });
+			}
+			add(existing);
+		}
+	}
+	if (filled < till - from) {
+		add({ filled, till - from - filled, tag });
+	}
+
+	finishMarkdownTagChange(from, till, { current.text, tags });
+
+	// Fire the tags to the spellchecker.
+	for (auto &apply : markdownTagApplies) {
+		_markdownTagApplies.fire(std::move(apply));
+	}
+}
+
+void InputField::removeMarkdownTag(
+		int from,
+		int till,
+		const QString &tag) {
+	const auto current = getTextWithTagsPart(from, till);
+	const auto tagRef = tag.midRef(0);
+
+	auto tags = TagList();
+	for (const auto &existing : current.tags) {
+		const auto id = TextUtilities::TagWithRemoved(existing.id, tag);
+		if (!id.isEmpty()) {
+			tags.push_back({ existing.offset, existing.length, id });
+		}
+	}
+
+	finishMarkdownTagChange(from, till, { current.text, tags });
+}
+
+void InputField::finishMarkdownTagChange(
+		int from,
+		int till,
+		const TextWithTags &textWithTags) {
+	auto cursor = _inner->textCursor();
+	cursor.setPosition(from);
+	cursor.setPosition(till, QTextCursor::KeepAnchor);
+	_insertedTags = textWithTags.tags;
+	_insertedTagsAreFromMime = false;
+	cursor.insertText(textWithTags.text, _defaultCharFormat);
+	_insertedTags.clear();
+
+	cursor.setCharFormat(_defaultCharFormat);
+	_inner->setTextCursor(cursor);
+}
+
+bool InputField::IsValidMarkdownLink(const QStringRef &link) {
 	return ::Ui::IsValidMarkdownLink(link);
 }
 
@@ -3229,33 +3401,40 @@ void InputField::toggleSelectionMarkdown(const QString &tag) {
 	if (from == till) {
 		return;
 	}
-	if (tag.isEmpty()
-		|| GetFullSimpleTextTag(getTextWithTagsSelected()) == tag) {
+	if (tag.isEmpty()) {
 		RemoveDocumentTags(_st, document(), from, till);
-		return;
-	}
-	const auto commitTag = [&] {
-		if (tag != kTagCode) {
-			return tag;
-		}
-		const auto leftForBlock = [&] {
-			if (!from) {
-				return true;
+	} else if (HasFullTextTag(getTextWithTagsSelected(), tag)) {
+		removeMarkdownTag(from, till, tag);
+	} else {
+		const auto useTag = [&] {
+			if (tag != kTagCode) {
+				return tag;
 			}
-			const auto text = getTextWithTagsPart(from - 1, from + 1).text;
-			return text.isEmpty()
-				|| IsNewline(text[0])
-				|| IsNewline(text[text.size() - 1]);
+			const auto leftForBlock = [&] {
+				if (!from) {
+					return true;
+				}
+				const auto text = getTextWithTagsPart(
+					from - 1,
+					from + 1
+				).text;
+				return text.isEmpty()
+					|| IsNewline(text[0])
+					|| IsNewline(text[text.size() - 1]);
+			}();
+			const auto rightForBlock = [&] {
+				const auto text = getTextWithTagsPart(
+					till - 1,
+					till + 1
+				).text;
+				return text.isEmpty()
+					|| IsNewline(text[0])
+					|| IsNewline(text[text.size() - 1]);
+			}();
+			return (leftForBlock && rightForBlock) ? kTagPre : kTagCode;
 		}();
-		const auto rightForBlock = [&] {
-			const auto text = getTextWithTagsPart(till - 1, till + 1).text;
-			return text.isEmpty()
-				|| IsNewline(text[0])
-				|| IsNewline(text[text.size() - 1]);
-		}();
-		return (leftForBlock && rightForBlock) ? kTagPre : kTagCode;
-	}();
-	commitMarkdownReplacement(from, till, commitTag);
+		addMarkdownTag(from, till, useTag);
+	}
 	auto restorePosition = textCursor();
 	restorePosition.setPosition((position == till) ? from : till);
 	restorePosition.setPosition(position, QTextCursor::KeepAnchor);
@@ -3389,7 +3568,6 @@ void InputField::addMarkdownActions(
 	if (disabled) {
 		return;
 	}
-	const auto fullTag = GetFullSimpleTextTag(textWithTags);
 	const auto add = [&](
 			const QString &base,
 			QKeySequence sequence,
@@ -3407,9 +3585,8 @@ void InputField::addMarkdownActions(
 			const QString &base,
 			QKeySequence sequence,
 			const QString &tag) {
-		const auto disabled = (fullTag == tag)
-			|| (fullTag == kTagPre && tag == kTagCode);
-		add(base, sequence, (!hasText || fullTag == tag), [=] {
+		const auto disabled = !hasText;
+		add(base, sequence, disabled, [=] {
 			toggleSelectionMarkdown(tag);
 		});
 	};

@@ -256,7 +256,10 @@ public:
 		EditLinkSelection selection,
 		const QString &text,
 		const QString &link);
-	static bool IsValidMarkdownLink(const QString &link);
+	static bool IsValidMarkdownLink(const QStringRef &link);
+	static bool IsValidMarkdownLink(const QString &link) {
+		return IsValidMarkdownLink(link.midRef(0));
+	}
 
 	const QString &getLastText() const {
 		return _lastTextWithTags.text;
@@ -450,6 +453,12 @@ private:
 		int till,
 		const QString &tag,
 		const QString &edge = QString());
+	void addMarkdownTag(int from, int till, const QString &tag);
+	void removeMarkdownTag(int from, int till, const QString &tag);
+	void finishMarkdownTagChange(
+		int from,
+		int till,
+		const TextWithTags &textWithTags);
 	void toggleSelectionMarkdown(const QString &tag);
 	void clearSelectionMarkdown();
 
