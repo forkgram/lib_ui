@@ -16,14 +16,16 @@
 #include <QtGui/QOpenGLFunctions>
 #include <QtWidgets/QOpenGLWidget>
 
-#define LOG_ONCE(x) static auto logged = [&] { LOG(x); return true; }();
+#define LOG_ONCE(x) [[maybe_unused]] static auto logged = [&] { LOG(x); return true; }();
 
 namespace Ui::GL {
 namespace {
 
 bool ForceDisabled/* = false*/;
 
+#ifdef Q_OS_WIN
 ANGLE ResolvedANGLE = ANGLE::Auto;
+#endif // Q_OS_WIN
 
 void CrashCheckStart() {
 	auto f = QFile(Integration::Instance().openglCheckFilePath());
@@ -102,7 +104,7 @@ Capabilities CheckCapabilities(QWidget *widget) {
 		LOG_ONCE(("OpenGL Profile: Compatibility."));
 	} break;
 	}
-	static const auto extensionsLogged = [&] {
+	[[maybe_unused]] static const auto extensionsLogged = [&] {
 		const auto renderer = reinterpret_cast<const char*>(
 			functions->glGetString(GL_RENDERER));
 		LOG(("OpenGL Renderer: %1").arg(renderer ? renderer : "[nullptr]"));
@@ -113,7 +115,7 @@ Capabilities CheckCapabilities(QWidget *widget) {
 			functions->glGetString(GL_VERSION));
 		LOG(("OpenGL Version: %1").arg(version ? version : "[nullptr]"));
 		auto list = QStringList();
-		for (const auto extension : context->extensions()) {
+		for (const auto &extension : context->extensions()) {
 			list.append(QString::fromLatin1(extension));
 		}
 		LOG(("OpenGL Extensions: %1").arg(list.join(", ")));

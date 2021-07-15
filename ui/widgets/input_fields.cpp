@@ -108,7 +108,6 @@ bool IsNewline(QChar ch) {
 	auto resultLink = QString();
 	const auto checkingLink = (tag == kTagCheckLinkMeta);
 	const auto &text = textWithTags.text;
-	const auto &tags = textWithTags.tags;
 	auto from = 0;
 	auto till = int(text.size());
 	const auto adjust = [&] {
@@ -161,29 +160,6 @@ bool IsNewline(QChar ch) {
 		const TextWithTags &textWithTags,
 		const QString &tag) {
 	return !CheckFullTextTag(textWithTags, tag).isEmpty();
-}
-
-QString GetFullSimpleTextTag(const TextWithTags &textWithTags) {
-	const auto &text = textWithTags.text;
-	const auto &tags = textWithTags.tags;
-	const auto tag = (tags.size() == 1) ? tags[0] : TextWithTags::Tag();
-	auto from = 0;
-	auto till = int(text.size());
-	for (; from != till; ++from) {
-		if (!IsNewline(text[from]) && !Text::IsSpace(text[from])) {
-			break;
-		}
-	}
-	while (till != from) {
-		if (!IsNewline(text[till - 1]) && !Text::IsSpace(text[till - 1])) {
-			break;
-		}
-		--till;
-	}
-	return ((tag.offset <= from)
-		&& (tag.offset + tag.length >= till))
-		? (tag.id == kTagPre ? kTagCode : tag.id)
-		: QString();
 }
 
 class TagAccumulator {
@@ -1062,8 +1038,7 @@ void FlatInput::touchEvent(QTouchEvent *e) {
 		if (!_touchPress) return;
 		auto weak = MakeWeak(this);
 		if (!_touchMove && window()) {
-			Qt::MouseButton btn(_touchRightButton ? Qt::RightButton : Qt::LeftButton);
-			QPoint mapped(mapFromGlobal(_touchStart)), winMapped(window()->mapFromGlobal(_touchStart));
+			QPoint mapped(mapFromGlobal(_touchStart));
 
 			if (_touchRightButton) {
 				QContextMenuEvent contextEvent(QContextMenuEvent::Mouse, mapped, _touchStart);
@@ -1101,7 +1076,6 @@ void FlatInput::finishAnimations() {
 void FlatInput::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = crl::now();
 	auto placeholderFocused = _placeholderFocusedAnimation.value(_focused ? 1. : 0.);
 	auto pen = anim::pen(_st.borderColor, _st.borderActive, placeholderFocused);
 	pen.setWidth(_st.borderWidth);
@@ -1353,7 +1327,7 @@ InputField::InputField(
 	_inner->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	_inner->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-	_inner->setFrameStyle(QFrame::NoFrame | QFrame::Plain);
+	_inner->setFrameStyle(int(QFrame::NoFrame) | QFrame::Plain);
 	_inner->viewport()->setAutoFillBackground(false);
 
 	_inner->setContentsMargins(0, 0, 0, 0);
@@ -1674,8 +1648,7 @@ void InputField::handleTouchEvent(QTouchEvent *e) {
 		if (!_touchPress) return;
 		auto weak = MakeWeak(this);
 		if (!_touchMove && window()) {
-			Qt::MouseButton btn(_touchRightButton ? Qt::RightButton : Qt::LeftButton);
-			QPoint mapped(mapFromGlobal(_touchStart)), winMapped(window()->mapFromGlobal(_touchStart));
+			QPoint mapped(mapFromGlobal(_touchStart));
 
 			if (_touchRightButton) {
 				QContextMenuEvent contextEvent(QContextMenuEvent::Mouse, mapped, _touchStart);
@@ -2303,9 +2276,6 @@ void InputField::onDocumentContentsChange(
 	const auto insertLength = (_realInsertPosition >= 0)
 		? _realCharsAdded
 		: charsAdded;
-
-	const auto removePosition = position;
-	const auto removeLength = charsRemoved;
 
 	_correcting = true;
 	QTextCursor(document->docHandle(), 0).joinPreviousEditBlock();
@@ -3879,8 +3849,7 @@ void MaskedInputField::touchEvent(QTouchEvent *e) {
 		if (!_touchPress) return;
 		auto weak = MakeWeak(this);
 		if (!_touchMove && window()) {
-			Qt::MouseButton btn(_touchRightButton ? Qt::RightButton : Qt::LeftButton);
-			QPoint mapped(mapFromGlobal(_touchStart)), winMapped(window()->mapFromGlobal(_touchStart));
+			QPoint mapped(mapFromGlobal(_touchStart));
 
 			if (_touchRightButton) {
 				QContextMenuEvent contextEvent(QContextMenuEvent::Mouse, mapped, _touchStart);
