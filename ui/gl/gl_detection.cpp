@@ -17,6 +17,14 @@
 #include <QtGui/QOpenGLFunctions>
 #include <QtWidgets/QOpenGLWidget>
 
+#ifdef Q_OS_WIN
+#include <QtGui/QGuiApplication>
+#include <qpa/qplatformnativeinterface.h>
+
+#define KHRONOS_STATIC
+#include <EGL/egl.h>
+#endif // Q_OS_WIN
+
 #define LOG_ONCE(x) [[maybe_unused]] static auto logged = [&] { LOG(x); return true; }();
 
 namespace Ui::GL {
@@ -43,8 +51,17 @@ Capabilities CheckCapabilities(QWidget *widget) {
 		LOG_ONCE(("OpenGL: Force-disabled."));
 		return {};
 	}
+
+	static const auto BugListInited = [] {
+		if (!QFile::exists(":/misc/gpu_driver_bug_list.json")) {
+			return false;
+		}
+		LOG(("OpenGL: Using custom 'gpu_driver_bug_list.json'."));
+		qputenv("QT_OPENGL_BUGLIST", ":/misc/gpu_driver_bug_list.json");
+		return true;
+	}();
+
 	auto format = QSurfaceFormat();
-	format.setAlphaBufferSize(8);
 	if (widget) {
 		if (!widget->window()->windowHandle()) {
 			widget->window()->createWinId();
@@ -57,6 +74,11 @@ Capabilities CheckCapabilities(QWidget *widget) {
 			LOG_ONCE(("OpenGL: Not supported for window."));
 			return {};
 		}
+		format = widget->window()->windowHandle()->format();
+		format.setAlphaBufferSize(8);
+		widget->window()->windowHandle()->setFormat(format);
+	} else {
+		format.setAlphaBufferSize(8);
 	}
 	auto tester = QOpenGLWidget(widget);
 	tester.setFormat(format);
@@ -104,6 +126,7 @@ Capabilities CheckCapabilities(QWidget *widget) {
 			return {};
 		}
 	}
+
 	const auto supported = context->format();
 	switch (supported.profile()) {
 	case QSurfaceFormat::NoProfile: {
@@ -121,6 +144,7 @@ Capabilities CheckCapabilities(QWidget *widget) {
 		LOG_ONCE(("OpenGL Profile: Compatibility."));
 	} break;
 	}
+
 	[[maybe_unused]] static const auto extensionsLogged = [&] {
 		const auto renderer = reinterpret_cast<const char*>(
 			functions->glGetString(GL_RENDERER));
@@ -136,8 +160,18 @@ Capabilities CheckCapabilities(QWidget *widget) {
 			list.append(QString::fromLatin1(extension));
 		}
 		LOG(("OpenGL Extensions: %1").arg(list.join(", ")));
+
+#ifdef Q_OS_WIN
+		auto egllist = QStringList();
+		for (const auto &extension : EGLExtensions(context)) {
+			egllist.append(QString::fromLatin1(extension));
+		}
+		LOG(("EGL Extensions: %1").arg(egllist.join(", ")));
+#endif // Q_OS_WIN
+
 		return true;
 	}();
+
 	const auto version = u"%1.%2"_q
 		.arg(supported.majorVersion())
 		.arg(supported.majorVersion());
@@ -216,6 +250,19 @@ void ChangeANGLE(ANGLE backend) {
 
 ANGLE CurrentANGLE() {
 	return ResolvedANGLE;
+}
+
+QList<QByteArray> EGLExtensions(not_null<QOpenGLContext*> context) {
+	const auto native = QGuiApplication::platformNativeInterface();
+	Assert(native != nullptr);
+
+	const auto display = static_cast<EGLDisplay>(
+		native->nativeResourceForContext(
+			QByteArrayLiteral("egldisplay"),
+			context));
+	return display
+		? QByteArray(eglQueryString(display, EGL_EXTENSIONS)).split(' ')
+		: QList<QByteArray>();
 }
 
 #endif // Q_OS_WIN
