@@ -94,7 +94,7 @@ not_null<QWidget*> TitleControls::window() const {
 
 void TitleControls::init(Fn<void(bool maximized)> maximize) {
 	if (_top) {
-		const auto flags = window()->windowFlags();
+		[[maybe_unused]] const auto flags = window()->windowFlags();
 		_top->setClickedCallback([=] {
 #ifdef Q_OS_LINUX
 			_topState = !_topState;
