@@ -7,7 +7,7 @@
 #include "ui/platform/mac/ui_window_mac.h"
 
 #include "ui/platform/mac/ui_window_title_mac.h"
-#include "ui/widgets/window.h"
+#include "ui/widgets/rp_window.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/palette.h"
 
@@ -410,6 +410,10 @@ void WindowHelper::init() {
 std::unique_ptr<BasicWindowHelper> CreateSpecialWindowHelper(
 		not_null<RpWidget*> window) {
 	return std::make_unique<WindowHelper>(window);
+}
+
+bool NativeWindowFrameSupported() {
+	return false;
 }
 
 } // namespace Platform

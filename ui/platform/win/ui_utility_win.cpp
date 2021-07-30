@@ -114,10 +114,10 @@ bool ShowWindowMenu(QWindow *window) {
 TitleControls::Layout TitleControlsLayout() {
 	return TitleControls::Layout{
 		.right = {
+			TitleControls::Control::OnTop,
 			TitleControls::Control::Minimize,
 			TitleControls::Control::Maximize,
 			TitleControls::Control::Close,
-			TitleControls::Control::OnTop,
 		}
 	};
 }

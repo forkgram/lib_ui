@@ -30,6 +30,7 @@ public:
 	[[nodiscard]] virtual not_null<RpWidget*> body();
 	virtual void setTitle(const QString &title);
 	virtual void setTitleStyle(const style::WindowTitle &st);
+	virtual void setNativeFrame(bool enabled);
 	virtual void setMinimumSize(QSize size);
 	virtual void setFixedSize(QSize size);
 	virtual void setStaysOnTop(bool enabled);
@@ -67,6 +68,7 @@ public:
 	not_null<RpWidget*> body() override;
 	void setTitle(const QString &title) override;
 	void setTitleStyle(const style::WindowTitle &st) override;
+	void setNativeFrame(bool enabled) override;
 	void setMinimumSize(QSize size) override;
 	void setFixedSize(QSize size) override;
 	void setGeometry(QRect rect) override;
@@ -82,10 +84,13 @@ private:
 	void paintBorders(QPainter &p);
 	void updateWindowExtents();
 	void updateCursor(Qt::Edges edges);
+	[[nodiscard]] int titleHeight() const;
+	[[nodiscard]] QMargins bodyPadding() const;
 
 	const not_null<DefaultTitleWidget*> _title;
 	const not_null<RpWidget*> _body;
 	bool _extentsSet = false;
+	bool _nativeFrame = false;
 
 };
 
@@ -99,6 +104,8 @@ private:
 	}
 	return std::make_unique<DefaultWindowHelper>(window);
 }
+
+bool NativeWindowFrameSupported();
 
 } // namespace Platform
 } // namespace Ui

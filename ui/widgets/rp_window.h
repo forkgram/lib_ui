@@ -29,16 +29,17 @@ inline constexpr bool is_flag_type(WindowTitleHitTestFlag) {
 }
 using WindowTitleHitTestFlags = base::flags<WindowTitleHitTestFlag>;
 
-class Window : public RpWidget {
+class RpWindow : public RpWidget {
 public:
-	explicit Window(QWidget *parent = nullptr);
-	~Window();
+	explicit RpWindow(QWidget *parent = nullptr);
+	~RpWindow();
 
 	[[nodiscard]] not_null<RpWidget*> body();
 	[[nodiscard]] not_null<const RpWidget*> body() const;
 
 	void setTitle(const QString &title);
 	void setTitleStyle(const style::WindowTitle &st);
+	void setNativeFrame(bool enabled);
 	void setMinimumSize(QSize size);
 	void setFixedSize(QSize size);
 	void setStaysOnTop(bool enabled);

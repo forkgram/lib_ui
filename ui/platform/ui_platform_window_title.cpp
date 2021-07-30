@@ -77,6 +77,7 @@ QRect TitleControls::geometry() const {
 			result = result.united(control->geometry());
 		}
 	};
+	add(_top);
 	add(_minimize);
 	add(_maximizeRestore);
 	add(_close);
@@ -93,12 +94,21 @@ not_null<QWidget*> TitleControls::window() const {
 
 void TitleControls::init(Fn<void(bool maximized)> maximize) {
 	if (_top) {
-		_top->setClickedCallback([=]() {
+		const auto flags = window()->windowFlags();
+		_top->setClickedCallback([=] {
+#ifdef Q_OS_LINUX
+			_topState = !_topState;
+			window()->setWindowFlag(Qt::WindowStaysOnTopHint, _topState);
+			window()->windowHandle()->destroy();
+			window()->windowHandle()->create();
+			window()->show();
+#else  // !Q_OS_LINUX
 			window()->setWindowFlags(_topState
-				? (window()->windowFlags() | Qt::WindowStaysOnBottomHint)
+				? flags
 				: Qt::WindowStaysOnTopHint);
 			window()->show();
 			_topState = !_topState;
+#endif // !Q_OS_LINUX
 			updateButtonsState();
 		});
 		_top->setPointerCursor(false);
