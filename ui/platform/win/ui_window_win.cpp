@@ -101,6 +101,24 @@ HRESULT WinApiSetWindowTheme(
 	return method ? method(hWnd, pszSubAppName, pszSubIdList) : HRESULT();
 }
 
+void FixAeroSnap(HWND handle) {
+	SetWindowLongPtr(
+		handle,
+		GWL_STYLE,
+		GetWindowLongPtr(handle, GWL_STYLE) | WS_CAPTION | WS_THICKFRAME);
+}
+
+[[nodiscard]] HWND ResolveWindowHandle(not_null<QWidget*> widget) {
+	if (!::Platform::IsWindows8OrGreater()) {
+		widget->setWindowFlag(Qt::FramelessWindowHint);
+	}
+	const auto result = GetWindowHandle(widget);
+	if (!::Platform::IsWindows8OrGreater()) {
+		FixAeroSnap(result);
+	}
+	return result;
+}
+
 } // namespace
 
 class WindowHelper::NativeFilter final : public QAbstractNativeEventFilter {
@@ -145,7 +163,7 @@ bool WindowHelper::NativeFilter::nativeEventFilter(
 
 WindowHelper::WindowHelper(not_null<RpWidget*> window)
 : BasicWindowHelper(window)
-, _handle(GetWindowHandle(window))
+, _handle(ResolveWindowHandle(window))
 , _title(Ui::CreateChild<TitleWidget>(window.get()))
 , _body(Ui::CreateChild<RpWidget>(window.get()))
 , _shadow(std::in_place, window, st::windowShadowFg->c) {
@@ -172,16 +190,32 @@ void WindowHelper::setTitleStyle(const style::WindowTitle &st) {
 }
 
 void WindowHelper::setNativeFrame(bool enabled) {
-	_nativeFrame = enabled;
+	if (!::Platform::IsWindows8OrGreater()) {
+		window()->windowHandle()->setFlag(Qt::FramelessWindowHint, !enabled);
+		if (!enabled) {
+			FixAeroSnap(_handle);
+		}
+	}
 	_title->setVisible(!enabled);
 	if (enabled) {
 		_shadow.reset();
 	} else {
 		_shadow.emplace(window(), st::windowShadowFg->c);
 		_shadow->setResizeEnabled(!fixedSize());
+		initialShadowUpdate();
 	}
 	updateMargins();
 	fixMaximizedWindow();
+}
+
+void WindowHelper::initialShadowUpdate() {
+	using Change = WindowShadow::Change;
+	const auto noShadowStates = (Qt::WindowMinimized | Qt::WindowMaximized);
+	if ((window()->windowState() & noShadowStates) || window()->isHidden()) {
+		_shadow->update(Change::Hidden);
+	} else {
+		_shadow->update(Change::Moved | Change::Resized | Change::Shown);
+	}
 }
 
 void WindowHelper::setMinimumSize(QSize size) {
@@ -217,7 +251,7 @@ void WindowHelper::showNormal() {
 }
 
 void WindowHelper::init() {
-	_title->show(); // Be consistent with _nativeFrame == false.
+	_title->show();
 	GetNativeFilter()->registerWindow(_handle, this);
 
 	style::PaletteChanged(
@@ -266,6 +300,8 @@ void WindowHelper::init() {
 		window()->windowHandle(),
 		&QWindow::windowStateChanged,
 		handleStateChanged);
+
+	initialShadowUpdate();
 }
 
 bool WindowHelper::handleNativeEvent(
@@ -290,14 +326,14 @@ bool WindowHelper::handleNativeEvent(
 	} return false;
 
 	case WM_NCPAINT: {
-		if (::Platform::IsWindows8OrGreater() || _nativeFrame) {
+		if (::Platform::IsWindows8OrGreater() || _title->isHidden()) {
 			return false;
 		}
 		if (result) *result = 0;
 	} return true;
 
 	case WM_NCCALCSIZE: {
-		if (_nativeFrame) {
+		if (_title->isHidden()) {
 			return false;
 		}
 		WINDOWPLACEMENT wp;
@@ -343,7 +379,7 @@ bool WindowHelper::handleNativeEvent(
 	} return true;
 
 	case WM_NCACTIVATE: {
-		if (_nativeFrame) {
+		if (_title->isHidden()) {
 			return false;
 		}
 		if (IsCompositionEnabled()) {
@@ -416,7 +452,7 @@ bool WindowHelper::handleNativeEvent(
 	} return false;
 
 	case WM_NCHITTEST: {
-		if (!result || _nativeFrame) {
+		if (!result || _title->isHidden()) {
 			return false;
 		}
 
@@ -449,7 +485,7 @@ bool WindowHelper::handleNativeEvent(
 	} return true;
 
 	case WM_NCRBUTTONUP: {
-		if (_nativeFrame) {
+		if (_title->isHidden()) {
 			return false;
 		}
 		SendMessage(_handle, WM_SYSCOMMAND, SC_MOUSEMENU, lParam);
@@ -566,9 +602,9 @@ void WindowHelper::updateMargins() {
 		_marginsDelta = QMargins();
 	}
 
-	if (_isFullScreen || _nativeFrame) {
+	if (_isFullScreen || _title->isHidden()) {
 		margins = QMargins();
-		if (_nativeFrame) {
+		if (_title->isHidden()) {
 			_marginsDelta = QMargins();
 		}
 	}

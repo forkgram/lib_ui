@@ -39,6 +39,7 @@ private:
 	void updateMargins();
 	void updateSystemMenu();
 	void updateSystemMenu(Qt::WindowState state);
+	void initialShadowUpdate();
 	void fixMaximizedWindow();
 	[[nodiscard]] bool handleNativeEvent(
 		UINT msg,
@@ -58,7 +59,6 @@ private:
 	QMargins _marginsDelta;
 	HMENU _menu = nullptr;
 	bool _isFullScreen = false;
-	bool _nativeFrame = false;
 
 };
 
