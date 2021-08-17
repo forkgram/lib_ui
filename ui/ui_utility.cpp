@@ -13,6 +13,7 @@
 #include <QtWidgets/QApplication>
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
+#include <QWheelEvent>
 #include <private/qhighdpiscaling_p.h>
 
 #include <array>
@@ -169,9 +170,7 @@ void SendSynteticMouseEvent(QWidget *widget, QEvent::Type type, Qt::MouseButton 
 			, button
 			, QGuiApplication::mouseButtons() | button
 			, QGuiApplication::keyboardModifiers()
-#ifndef OS_MAC_OLD
 			, Qt::MouseEventSynthesizedByApplication
-#endif // OS_MAC_OLD
 		);
 		ev.setTimestamp(crl::now());
 		QGuiApplication::sendEvent(windowHandle, &ev);
@@ -218,6 +217,17 @@ void DisableCustomScaling() {
 	if (QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)) {
 		QHighDpiScaling::setGlobalFactor(1);
 	}
+}
+
+int WheelDirection(not_null<QWheelEvent*> e) {
+	// Only a mouse wheel is accepted.
+	constexpr auto step = static_cast<int>(QWheelEvent::DefaultDeltasPerStep);
+	const auto delta = e->angleDelta().y();
+	const auto absDelta = std::abs(delta);
+	if (absDelta != step) {
+		return 0;
+	}
+	return (delta / absDelta);
 }
 
 } // namespace Ui

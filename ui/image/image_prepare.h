@@ -27,6 +27,13 @@ namespace Images {
 
 [[nodiscard]] QPixmap PixmapFast(QImage &&image);
 [[nodiscard]] QImage BlurLargeImage(QImage image, int radius);
+[[nodiscard]] QImage DitherImage(QImage image);
+
+[[nodiscard]] QImage GenerateGradient(
+	QSize size,
+	const std::vector<QColor> &colors, // colors.size() <= 4.
+	int rotation = 0,
+	float progress = 1.f);
 
 [[nodiscard]] const std::array<QImage, 4> &CornersMask(
 	ImageRoundRadius radius);
@@ -38,6 +45,28 @@ namespace Images {
 [[nodiscard]] std::array<QImage, 4> PrepareCorners(
 	int radius,
 	const style::color &color);
+
+[[nodiscard]] QByteArray UnpackGzip(const QByteArray &bytes);
+
+// Try to read images up to 64MB.
+inline constexpr auto kReadBytesLimit = 64 * 1024 * 1024;
+inline constexpr auto kReadMaxArea = 12'032 * 9'024;
+
+struct ReadArgs {
+	QString path;
+	QByteArray content;
+	QSize maxSize;
+	bool gzipSvg = false;
+	bool forceOpaque = false;
+	bool returnContent = false;
+};
+struct ReadResult {
+	QImage image;
+	QByteArray content;
+	QByteArray format;
+	bool animated = false;
+};
+[[nodiscard]] ReadResult Read(ReadArgs &&args);
 
 QImage prepareBlur(QImage image);
 void prepareRound(
