@@ -8,6 +8,7 @@
 
 #include "ui/style/style_core.h"
 #include "base/basic_types.h"
+#include "styles/palette.h"
 
 #include <QtGui/QPainter>
 
@@ -20,8 +21,8 @@ uint32 colorKey(QColor c) {
 }
 
 base::flat_map<const IconMask*, QImage> iconMasks;
-QMap<QPair<const IconMask*, uint32>, QPixmap> iconPixmaps;
-OrderedSet<IconData*> iconData;
+base::flat_map<QPair<const IconMask*, uint32>, QPixmap> iconPixmaps;
+base::flat_set<IconData*> iconData;
 
 QImage createIconMask(const IconMask *mask, int scale) {
 	auto maskImage = QImage::fromData(mask->data(), mask->size(), "PNG");
@@ -85,6 +86,14 @@ QSize readGeneratedSize(const IconMask *mask, int scale) {
 }
 
 } // namespace
+
+MonoIcon::MonoIcon(const MonoIcon &other, const style::palette &palette)
+: _mask(other._mask)
+, _color(
+	palette.colorAtIndex(
+		style::main_palette::indexOfColor(other._color)))
+, _offset(other._offset) {
+}
 
 MonoIcon::MonoIcon(const IconMask *mask, Color color, QPoint offset)
 : _mask(mask)
@@ -268,17 +277,31 @@ void MonoIcon::ensureColorizedImage(QColor color) const {
 
 void MonoIcon::createCachedPixmap() const {
 	auto key = qMakePair(_mask, colorKey(_color->c));
-	auto j = iconPixmaps.constFind(key);
-	if (j == iconPixmaps.cend()) {
+	auto j = iconPixmaps.find(key);
+	if (j == end(iconPixmaps)) {
 		auto image = colorizeImage(_maskImage, _color);
-		j = iconPixmaps.insert(key, QPixmap::fromImage(std::move(image)));
+		j = iconPixmaps.emplace(
+			key,
+			QPixmap::fromImage(std::move(image))).first;
 	}
-	_pixmap = j.value();
+	_pixmap = j->second;
 	_size = _pixmap.size() / DevicePixelRatio();
 }
 
+IconData::IconData(const IconData &other, const style::palette &palette) {
+	created();
+	_parts.reserve(other._parts.size());
+	for (const auto &part : other._parts) {
+		_parts.push_back(MonoIcon(part, palette));
+	}
+}
+
 void IconData::created() {
-	iconData.insert(this);
+	iconData.emplace(this);
+}
+
+IconData::~IconData() {
+	iconData.remove(this);
 }
 
 void IconData::fill(QPainter &p, const QRect &rect) const {
@@ -304,7 +327,8 @@ void IconData::fill(QPainter &p, const QRect &rect, QColor colorOverride) const 
 }
 
 QImage IconData::instance(QColor colorOverride, int scale) const {
-	Assert(_parts.size() == 1);
+	Expects(_parts.size() == 1);
+
 	auto &part = _parts[0];
 	Assert(part.offset() == QPoint(0, 0));
 	return part.instance(colorOverride, scale);
@@ -328,6 +352,15 @@ int IconData::height() const {
 		}
 	}
 	return _height;
+}
+
+Icon Icon::withPalette(const style::palette &palette) const {
+	Expects(_data != nullptr);
+
+	auto result = Icon(Qt::Uninitialized);
+	result._data = new IconData(*_data, palette);
+	result._owner = true;
+	return result;
 }
 
 void resetIcons() {
