@@ -131,10 +131,14 @@ PRIVATE
     ui/style/style_core_font.h
     ui/style/style_core_icon.cpp
     ui/style/style_core_icon.h
+    ui/style/style_core_palette.cpp
+    ui/style/style_core_palette.h
     ui/style/style_core_scale.cpp
     ui/style/style_core_scale.h
     ui/style/style_core_types.cpp
     ui/style/style_core_types.h
+    ui/style/style_palette_colorizer.cpp
+    ui/style/style_palette_colorizer.h
     ui/text/text.cpp
     ui/text/text.h
     ui/text/text_block.cpp
