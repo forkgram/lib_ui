@@ -414,6 +414,11 @@ TitleControls::Layout GtkKeywordsToTitleControlsLayout(const QString &keywords) 
 			ranges::back_inserter(controlsRight),
 			GtkKeywordToTitleControl);
 	}
+	if (!controlsRight.empty()) {
+		controlsRight.push_back(TitleControls::Control::OnTop);
+	} else if (!controlsLeft.empty()) {
+		controlsLefto.push_back(TitleControls::Control::OnTop);
+	}
 
 	return TitleControls::Layout{
 		.left = controlsLeft,
@@ -608,7 +613,6 @@ TitleControls::Layout TitleControlsLayout() {
 	}();
 
 	if (portalResult.has_value()) {
-		portalResult->right.push_back(TitleControls::Control::OnTop);
 		return *portalResult;
 	}
 #endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
