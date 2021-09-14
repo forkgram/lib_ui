@@ -417,7 +417,7 @@ TitleControls::Layout GtkKeywordsToTitleControlsLayout(const QString &keywords) 
 	if (!controlsRight.empty()) {
 		controlsRight.push_back(TitleControls::Control::OnTop);
 	} else if (!controlsLeft.empty()) {
-		controlsLefto.push_back(TitleControls::Control::OnTop);
+		controlsLeft.push_back(TitleControls::Control::OnTop);
 	}
 
 	return TitleControls::Layout{
