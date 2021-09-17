@@ -408,16 +408,12 @@ TitleControls::Layout GtkKeywordsToTitleControlsLayout(const QString &keywords) 
 		GtkKeywordToTitleControl);
 
 	std::vector<TitleControls::Control> controlsRight;
+	controlsRight.push_back(TitleControls::Control::OnTop);
 	if (splitted.size() > 1) {
 		ranges::transform(
 			splitted[1].split(','),
 			ranges::back_inserter(controlsRight),
 			GtkKeywordToTitleControl);
-	}
-	if (!controlsRight.empty()) {
-		controlsRight.push_back(TitleControls::Control::OnTop);
-	} else if (!controlsLeft.empty()) {
-		controlsLeft.push_back(TitleControls::Control::OnTop);
 	}
 
 	return TitleControls::Layout{
