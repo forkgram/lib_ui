@@ -8,6 +8,7 @@
 
 #include "ui/platform/mac/ui_window_title_mac.h"
 #include "ui/widgets/rp_window.h"
+#include "base/qt_adapters.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/palette.h"
 
@@ -15,7 +16,7 @@
 #include <QtCore/QAbstractNativeEventFilter>
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
-#include <QtWidgets/QOpenGLWidget>
+#include <QOpenGLWidget>
 #include <Cocoa/Cocoa.h>
 
 @interface WindowObserver : NSObject {
@@ -93,9 +94,9 @@ public:
 	bool nativeEventFilter(
 			const QByteArray &eventType,
 			void *message,
-			long *result) {
+			base::NativeEventResult *result) {
 		NSEvent *e = static_cast<NSEvent*>(message);
-		return (e && [e type] == NSEventTypeLeftMouseDown)
+		return (e && [e type] == NSEventTypeLeftMouseDragged)
 			? _checkPerformDrag([e window])
 			: false;
 		return false;
@@ -398,6 +399,15 @@ void WindowHelper::init() {
 			size.width(),
 			size.height() - titleHeight);
 	}, _body->lifetime());
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	setBodyTitleArea([=](QPoint widgetPoint) {
+		using Flag = Ui::WindowTitleHitTestFlag;
+		return (_body->y() > widgetPoint.y())
+			? (Flag::Move | Flag::Maximize)
+			: Flag::None;
+	});
+#endif // Qt >= 6.0.0
 }
 
 std::unique_ptr<BasicWindowHelper> CreateSpecialWindowHelper(
