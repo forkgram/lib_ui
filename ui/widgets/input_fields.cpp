@@ -1161,8 +1161,9 @@ void FlatInput::refreshPlaceholder(const QString &text) {
 }
 
 void FlatInput::contextMenuEvent(QContextMenuEvent *e) {
-	if (auto menu = createStandardContextMenu()) {
-		(new PopupMenu(this, menu))->popup(e->globalPos());
+	if (const auto menu = createStandardContextMenu()) {
+		_contextMenu = base::make_unique_q<PopupMenu>(this, menu);
+		_contextMenu->popup(e->globalPos());
 	}
 }
 
@@ -4025,7 +4026,8 @@ void MaskedInputField::setPlaceholder(rpl::producer<QString> placeholder) {
 
 void MaskedInputField::contextMenuEvent(QContextMenuEvent *e) {
 	if (const auto menu = createStandardContextMenu()) {
-		(new PopupMenu(this, menu))->popup(e->globalPos());
+		_contextMenu = base::make_unique_q<PopupMenu>(this, menu);
+		_contextMenu->popup(e->globalPos());
 	}
 }
 
