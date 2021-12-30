@@ -33,6 +33,7 @@ enum class EntityType : uchar {
 	StrikeOut,
 	Code, // inline
 	Pre,  // block
+	Spoiler,
 };
 
 enum class EntityLinkShown : uchar {
@@ -290,9 +291,11 @@ QString MarkdownCodeGoodBefore();
 QString MarkdownCodeBadAfter();
 QString MarkdownPreGoodBefore();
 QString MarkdownPreBadAfter();
+QString MarkdownSpoilerGoodBefore();
+QString MarkdownSpoilerBadAfter();
 
 // Text preprocess.
-QString Clean(const QString &text);
+QString Clean(const QString &text, bool keepSpoilers = false);
 QString EscapeForRichParsing(const QString &text);
 QString SingleLine(const QString &text);
 TextWithEntities SingleLine(const TextWithEntities &text);
@@ -363,6 +366,7 @@ inline const auto kMentionTagStart = qstr("mention://user.");
 [[nodiscard]] bool IsMentionLink(QStringView link);
 [[nodiscard]] bool IsSeparateTag(QStringView tag);
 [[nodiscard]] QString JoinTag(const QList<QStringView> &list);
+[[nodiscard]] QList<QStringView> SplitTags(const QString &tag);
 [[nodiscard]] QString TagWithRemoved(
 	const QString &tag,
 	const QString &removed);
@@ -376,5 +380,13 @@ std::unique_ptr<QMimeData> MimeDataFromText(TextWithTags &&text);
 void SetClipboardText(
 	const TextForMimeData &text,
 	QClipboard::Mode mode = QClipboard::Clipboard);
+
+[[nodiscard]] QString TextWithSpoilerCommands(
+	const TextWithEntities &textWithEntities);
+[[nodiscard]] QString CutTextWithCommands(
+	QString text,
+	int length,
+	const QString &start,
+	const QString &stop);
 
 } // namespace TextUtilities

@@ -22,6 +22,8 @@
 namespace TextUtilities {
 namespace {
 
+constexpr auto kTagSeparator = '$';
+
 using namespace Ui::Text;
 
 QString ExpressionMailNameAtEnd() {
@@ -66,6 +68,10 @@ QString SeparatorsStrikeOut() {
 
 QString SeparatorsMono() {
 	return Separators(QString::fromUtf8("*~/"));
+}
+
+QString SeparatorsSpoiler() {
+	return Separators(QString::fromUtf8("|*~/"));
 }
 
 QString ExpressionHashtag() {
@@ -1269,6 +1275,14 @@ QString MarkdownPreBadAfter() {
 	return QString::fromLatin1("`");
 }
 
+QString MarkdownSpoilerGoodBefore() {
+	return SeparatorsSpoiler();
+}
+
+QString MarkdownSpoilerBadAfter() {
+	return QString::fromLatin1("|");
+}
+
 bool IsValidProtocol(const QString &protocol) {
 	static const auto list = CreateValidProtocols();
 	return list.contains(base::crc32(protocol.constData(), protocol.size() * sizeof(QChar)));
@@ -1279,9 +1293,17 @@ bool IsValidTopDomain(const QString &protocol) {
 	return list.contains(base::crc32(protocol.constData(), protocol.size() * sizeof(QChar)));
 }
 
-QString Clean(const QString &text) {
+QString Clean(const QString &text, bool keepSpoilers) {
 	auto result = text;
 	for (auto s = text.unicode(), ch = s, e = text.unicode() + text.size(); ch != e; ++ch) {
+		if (keepSpoilers && (*ch == TextCommand)) {
+			if ((*(ch + 1) == TextCommandSpoiler)
+				|| (*(ch - 1) == TextCommandSpoiler)
+				|| (*(ch + 1) == TextCommandNoSpoiler)
+				|| (*(ch - 1) == TextCommandNoSpoiler)) {
+				continue;
+			}
+		}
 		if (*ch == TextCommand) {
 			result[int(ch - s)] = QChar::Space;
 		}
@@ -2041,17 +2063,21 @@ QString JoinTag(const QList<QStringView> &list) {
 	result.append(list.front());
 	for (auto i = 1, count = int(list.size()); i != count; ++i) {
 		if (!IsSeparateTag(list[i])) {
-			result.append('|').append(list[i]);
+			result.append(kTagSeparator).append(list[i]);
 		}
 	}
 	return result;
+}
+
+QList<QStringView> SplitTags(const QString &tag) {
+	return QStringView(tag).split(kTagSeparator);
 }
 
 QString TagWithRemoved(const QString &tag, const QString &removed) {
 	if (tag == removed) {
 		return QString();
 	}
-	auto list = QStringView(tag).split('|');
+	auto list = SplitTags(tag);
 	list.erase(ranges::remove(list, QStringView(removed)), list.end());
 	return JoinTag(list);
 }
@@ -2060,7 +2086,7 @@ QString TagWithAdded(const QString &tag, const QString &added) {
 	if (tag.isEmpty() || tag == added) {
 		return added;
 	}
-	auto list = QStringView(tag).split('|');
+	auto list = SplitTags(tag);
 	const auto ref = QStringView(added);
 	if (list.contains(ref)) {
 		return tag;
@@ -2081,6 +2107,7 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 		EntityType::Italic,
 		EntityType::Underline,
 		EntityType::StrikeOut,
+		EntityType::Spoiler,
 		EntityType::Code,
 		EntityType::Pre,
 	};
@@ -2173,7 +2200,7 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 	};
 	const auto stateForTag = [&](const QString &tag) {
 		auto result = State();
-		const auto list = QStringView(tag).split('|');
+		const auto list = SplitTags(tag);
 		for (const auto &single : list) {
 			if (single == Ui::InputField::kTagBold) {
 				result.set(EntityType::Bold);
@@ -2187,6 +2214,8 @@ EntitiesInText ConvertTextTagsToEntities(const TextWithTags::Tags &tags) {
 				result.set(EntityType::Code);
 			} else if (single == Ui::InputField::kTagPre) {
 				result.set(EntityType::Pre);
+			} else if (single == Ui::InputField::kTagSpoiler) {
+				result.set(EntityType::Spoiler);
 			} else {
 				result.link = single.toString();
 			}
@@ -2275,6 +2304,7 @@ TextWithTags::Tags ConvertEntitiesToTextTags(
 			break;
 		case EntityType::Code: push(Ui::InputField::kTagCode); break; // #TODO entities
 		case EntityType::Pre: push(Ui::InputField::kTagPre); break;
+		case EntityType::Spoiler: push(Ui::InputField::kTagSpoiler); break;
 		}
 	}
 	if (!toRemove.empty()) {
@@ -2300,6 +2330,36 @@ void SetClipboardText(
 	if (auto data = MimeDataFromText(text)) {
 		QGuiApplication::clipboard()->setMimeData(data.release(), mode);
 	}
+}
+
+QString TextWithSpoilerCommands(const TextWithEntities &textWithEntities) {
+	auto text = textWithEntities.text;
+	auto offset = 0;
+	const auto start = textcmdStartSpoiler();
+	const auto stop = textcmdStopSpoiler();
+	for (const auto &e : textWithEntities.entities) {
+		if (e.type() == EntityType::Spoiler) {
+			text.insert(e.offset() + offset, start);
+			offset += start.size();
+			text.insert(e.offset() + e.length() + offset, stop);
+			offset += stop.size();
+		}
+	}
+	return text;
+}
+
+QString CutTextWithCommands(
+		QString text,
+		int length,
+		const QString &start,
+		const QString &stop) {
+	text = text.mid(0, length);
+	const auto lastStart = text.lastIndexOf(start);
+	const auto lastStop = text.lastIndexOf(stop);
+	const auto additional = ((lastStart == -1) || (lastStart < lastStop))
+		? QString()
+		: stop;
+	return text + additional + Ui::kQEllipsis;
 }
 
 } // namespace TextUtilities

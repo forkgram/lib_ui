@@ -15,6 +15,12 @@
 #include <private/qfixed_p.h>
 #include <any>
 
+class SpoilerClickHandler;
+
+namespace Ui {
+static const auto kQEllipsis = QStringLiteral("...");
+} // namespace Ui
+
 static const QChar TextCommand(0x0010);
 enum TextCommands {
 	TextCommandBold        = 0x01,
@@ -30,6 +36,8 @@ enum TextCommands {
 	TextCommandLinkIndex   = 0x0B, // 0 - NoLink
 	TextCommandLinkText    = 0x0C,
 	TextCommandSkipBlock   = 0x0D,
+	TextCommandSpoiler     = 0x0E,
+	TextCommandNoSpoiler   = 0x0F,
 
 	TextCommandLangTag     = 0x20,
 };
@@ -131,6 +139,11 @@ public:
 
 	void setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk);
 	bool hasLinks() const;
+	void setSpoiler(
+		uint16 lnkIndex,
+		const std::shared_ptr<SpoilerClickHandler> &lnk);
+	void setSpoilerShown(uint16 lnkIndex, bool shown);
+	int spoilersCount() const;
 
 	bool hasSkipBlock() const;
 	bool updateSkipBlock(int width, int height);
@@ -205,6 +218,8 @@ private:
 	// it is also called from move constructor / assignment operator
 	void clearFields();
 
+	ClickHandlerPtr spoilerLink(uint16 spoilerIndex) const;
+
 	TextForMimeData toText(
 		TextSelection selection,
 		bool composeExpanded,
@@ -220,7 +235,14 @@ private:
 	TextBlocks _blocks;
 	TextLinks _links;
 
+	QVector<std::shared_ptr<SpoilerClickHandler>> _spoilers;
+
 	Qt::LayoutDirection _startDir = Qt::LayoutDirectionAuto;
+
+	struct {
+		std::array<QImage, 4> corners;
+		QColor color;
+	} _spoilerCache, _spoilerShownCache;
 
 	friend class Parser;
 	friend class Renderer;
@@ -264,4 +286,8 @@ QString textcmdLink(ushort lnkIndex, const QString &text);
 QString textcmdLink(const QString &url, const QString &text);
 QString textcmdStartSemibold();
 QString textcmdStopSemibold();
+
+QString textcmdStartSpoiler();
+QString textcmdStopSpoiler();
+
 const QChar *textSkipCommand(const QChar *from, const QChar *end, bool canLink = true);
