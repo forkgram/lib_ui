@@ -30,6 +30,10 @@ constexpr auto kStringLinkIndexShift = uint16(0x8000);
 constexpr auto kMaxDiacAfterSymbol = 2;
 constexpr auto kSelectedSpoilerOpacity = 0.5;
 
+inline bool IsMono(int32 flags) {
+	return (flags & TextBlockFPre) || (flags & TextBlockFCode);
+}
+
 Qt::LayoutDirection StringDirection(
 		const QString &str,
 		int from,
@@ -59,25 +63,14 @@ Qt::LayoutDirection StringDirection(
 	return Qt::LayoutDirectionAuto;
 }
 
-TextWithEntities PrepareRichFromPlain(
-		const QString &text,
-		const TextParseOptions &options) {
-	auto result = TextWithEntities{ text };
-	if (options.flags & TextParseLinks) {
-		TextUtilities::ParseEntities(
-			result,
-			options.flags,
-			(options.flags & TextParseRichText));
-	}
-	return result;
-}
-
 TextWithEntities PrepareRichFromRich(
 		const TextWithEntities &text,
 		const TextParseOptions &options) {
 	auto result = text;
 	const auto &preparsed = text.entities;
-	if ((options.flags & TextParseLinks) && !preparsed.isEmpty()) {
+	const bool parseLinks = (options.flags & TextParseLinks);
+	const bool parsePlainLinks = (options.flags & TextParsePlainLinks);
+	if (!preparsed.isEmpty() && (parseLinks || parsePlainLinks)) {
 		bool parseMentions = (options.flags & TextParseMentions);
 		bool parseHashtags = (options.flags & TextParseHashtags);
 		bool parseBotCommands = (options.flags & TextParseBotCommands);
@@ -91,6 +84,12 @@ TextWithEntities PrepareRichFromRich(
 				if (((type == EntityType::Mention || type == EntityType::MentionName) && !parseMentions) ||
 					(type == EntityType::Hashtag && !parseHashtags) ||
 					(type == EntityType::Cashtag && !parseHashtags) ||
+					(type == EntityType::PlainLink
+						&& !parsePlainLinks
+						&& !parseMarkdown) ||
+					(!parseLinks
+						&& (type == EntityType::Url
+							|| type == EntityType::CustomUrl)) ||
 					(type == EntityType::BotCommand && !parseBotCommands) || // #TODO entities
 					(!parseMarkdown && (type == EntityType::Bold
 						|| type == EntityType::Semibold
@@ -148,112 +147,6 @@ bool IsBad(QChar ch) {
 } // namespace Text
 } // namespace Ui
 
-QString textcmdSkipBlock(ushort w, ushort h) {
-	static QString cmd(5, TextCommand);
-	cmd[1] = QChar(TextCommandSkipBlock);
-	cmd[2] = QChar(w);
-	cmd[3] = QChar(h);
-	return cmd;
-}
-
-QString textcmdStartLink(ushort lnkIndex) {
-	static QString cmd(4, TextCommand);
-	cmd[1] = QChar(TextCommandLinkIndex);
-	cmd[2] = QChar(lnkIndex);
-	return cmd;
-}
-
-QString textcmdStartLink(const QString &url) {
-	if (url.size() >= 4096) return QString();
-
-	QString result;
-	result.reserve(url.size() + 4);
-	return result.append(TextCommand).append(QChar(TextCommandLinkText)).append(QChar(int(url.size()))).append(url).append(TextCommand);
-}
-
-QString textcmdStopLink() {
-	return textcmdStartLink(0);
-}
-
-QString textcmdLink(ushort lnkIndex, const QString &text) {
-	QString result;
-	result.reserve(4 + text.size() + 4);
-	return result.append(textcmdStartLink(lnkIndex)).append(text).append(textcmdStopLink());
-}
-
-QString textcmdLink(const QString &url, const QString &text) {
-	QString result;
-	result.reserve(4 + url.size() + text.size() + 4);
-	return result.append(textcmdStartLink(url)).append(text).append(textcmdStopLink());
-}
-
-QString textcmdStartSemibold() {
-	QString result;
-	result.reserve(3);
-	return result.append(TextCommand).append(QChar(TextCommandSemibold)).append(TextCommand);
-}
-
-QString textcmdStopSemibold() {
-	QString result;
-	result.reserve(3);
-	return result.append(TextCommand).append(QChar(TextCommandNoSemibold)).append(TextCommand);
-}
-
-QString textcmdStartSpoiler() {
-	QString result;
-	result.reserve(3);
-	return result.append(TextCommand).append(QChar(TextCommandSpoiler)).append(TextCommand);
-}
-
-QString textcmdStopSpoiler() {
-	QString result;
-	result.reserve(3);
-	return result.append(TextCommand).append(QChar(TextCommandNoSpoiler)).append(TextCommand);
-}
-
-const QChar *textSkipCommand(const QChar *from, const QChar *end, bool canLink) {
-	const QChar *result = from + 1;
-	if (*from != TextCommand || result >= end) return from;
-
-	ushort cmd = result->unicode();
-	++result;
-	if (result >= end) return from;
-
-	switch (cmd) {
-	case TextCommandBold:
-	case TextCommandNoBold:
-	case TextCommandSemibold:
-	case TextCommandNoSemibold:
-	case TextCommandItalic:
-	case TextCommandNoItalic:
-	case TextCommandUnderline:
-	case TextCommandNoUnderline:
-	case TextCommandSpoiler:
-	case TextCommandNoSpoiler:
-		break;
-
-	case TextCommandLinkIndex:
-		if (result->unicode() > 0x7FFF) return from;
-		++result;
-		break;
-
-	case TextCommandLinkText: {
-		ushort len = result->unicode();
-		if (len >= 4096 || !canLink) return from;
-		result += len + 1;
-	} break;
-
-	case TextCommandSkipBlock:
-		result += 2;
-		break;
-
-	case TextCommandLangTag:
-		result += 1;
-		break;
-	}
-	return (result < end && *result == TextCommand) ? (result + 1) : from;
-}
-
 const TextParseOptions _defaultOptions = {
 	TextParseLinks | TextParseMultiline, // flags
 	0, // maxw
@@ -273,11 +166,6 @@ namespace Text {
 
 class Parser {
 public:
-	Parser(
-		not_null<String*> string,
-		const QString &text,
-		const TextParseOptions &options,
-		const std::any &context);
 	Parser(
 		not_null<String*> string,
 		const TextWithEntities &textWithEntities,
@@ -320,15 +208,11 @@ private:
 	void createBlock(int32 skipBack = 0);
 	void createSkipBlock(int32 w, int32 h);
 	void createNewlineBlock();
-	bool checkCommand();
 
 	// Returns true if at least one entity was parsed in the current position.
 	bool checkEntities();
-	bool readSkipBlockCommand();
-	bool readCommand();
 	void parseCurrentChar();
 	void parseEmojiFromCurrent();
-	void checkForElidedSkipBlock();
 	void finalize(const TextParseOptions &options);
 
 	void finishEntities();
@@ -352,7 +236,6 @@ private:
 	const QChar *_ptr = nullptr;
 	const EntitiesInText::const_iterator _entitiesEnd;
 	EntitiesInText::const_iterator _waitingEntity;
-	const bool _rich = false;
 	const bool _multiline = false;
 
 	const QFixed _stopAfterWidth; // summary width of all added words
@@ -360,12 +243,13 @@ private:
 
 	std::vector<EntityLinkData> _links;
 	std::vector<EntityLinkData> _spoilers;
+	std::vector<EntityLinkData> _monos;
 	base::flat_map<
 		const QChar*,
 		std::vector<StartedEntity>> _startedEntities;
 
 	uint16 _maxLnkIndex = 0;
-	uint16 _maxSpoilerIndex = 0;
+	uint16 _maxShiftedLnkIndex = 0;
 
 	// current state
 	int32 _flags = 0;
@@ -422,19 +306,6 @@ std::optional<uint16> Parser::StartedEntity::spoilerIndex() const {
 
 Parser::Parser(
 	not_null<String*> string,
-	const QString &text,
-	const TextParseOptions &options,
-	const std::any &context)
-: Parser(
-	string,
-	PrepareRichFromPlain(text, options),
-	options,
-	context,
-	ReadyToken()) {
-}
-
-Parser::Parser(
-	not_null<String*> string,
 	const TextWithEntities &textWithEntities,
 	const TextParseOptions &options,
 	const std::any &context)
@@ -460,7 +331,6 @@ Parser::Parser(
 , _ptr(_start)
 , _entitiesEnd(_source.entities.end())
 , _waitingEntity(_source.entities.begin())
-, _rich(options.flags & TextParseRichText)
 , _multiline(options.flags & TextParseMultiline)
 , _stopAfterWidth(ComputeStopAfter(options, *_t->_st))
 , _checkTilde(ComputeCheckTilde(*_t->_st)) {
@@ -478,8 +348,10 @@ void Parser::createBlock(int32 skipBack) {
 	if (_lnkIndex < kStringLinkIndexShift && _lnkIndex > _maxLnkIndex) {
 		_maxLnkIndex = _lnkIndex;
 	}
-	if (_spoilerIndex > _maxSpoilerIndex) {
-		_maxSpoilerIndex = _spoilerIndex;
+	if (_lnkIndex > kStringLinkIndexShift) {
+		_maxShiftedLnkIndex = std::max(
+			uint16(_lnkIndex - kStringLinkIndexShift),
+			_maxShiftedLnkIndex);
 	}
 
 	int32 len = int32(_t->_text.size()) + skipBack - _blockStart;
@@ -518,17 +390,6 @@ void Parser::createNewlineBlock() {
 	createBlock();
 	_t->_text.push_back(QChar::LineFeed);
 	createBlock();
-}
-
-bool Parser::checkCommand() {
-	bool result = false;
-	for (QChar c = ((_ptr < _end) ? *_ptr : 0); c == TextCommand; c = ((_ptr < _end) ? *_ptr : 0)) {
-		if (!readCommand()) {
-			break;
-		}
-		result = true;
-	}
-	return result;
 }
 
 void Parser::finishEntities() {
@@ -601,16 +462,41 @@ bool Parser::checkEntities() {
 		flags = TextBlockFItalic;
 	} else if (entityType == EntityType::Underline) {
 		flags = TextBlockFUnderline;
+	} else if (entityType == EntityType::PlainLink) {
+		flags = TextBlockFPlainLink;
 	} else if (entityType == EntityType::StrikeOut) {
 		flags = TextBlockFStrikeOut;
-	} else if (entityType == EntityType::Code) { // #TODO entities
-		flags = TextBlockFCode;
-	} else if (entityType == EntityType::Pre) {
-		flags = TextBlockFPre;
-		createBlock();
-		if (!_t->_blocks.empty() && _t->_blocks.back()->type() != TextBlockTNewline) {
-			createNewlineBlock();
+	} else if ((entityType == EntityType::Code) // #TODO entities
+		|| (entityType == EntityType::Pre)) {
+		if (entityType == EntityType::Code) {
+			flags = TextBlockFCode;
+		} else {
+			flags = TextBlockFPre;
+			createBlock();
+			if (!_t->_blocks.empty()
+				&& _t->_blocks.back()->type() != TextBlockTNewline) {
+				createNewlineBlock();
+			}
 		}
+		const auto text = QString(entityBegin, entityLength);
+		auto data = QString(2, QChar(0));
+
+		// End of an entity.
+		data[0] = QChar(_waitingEntity->offset() + entityLength);
+
+		{
+			// It is better to trim the text to identify "Sample\n" as inline.
+			const auto trimmed = text.trimmed();
+			const auto isSingleLine = !trimmed.isEmpty()
+				&& ranges::none_of(trimmed, IsNewline);
+			data[1] = QChar(isSingleLine ? 1 : 2);
+		}
+
+		_monos.push_back({
+			.text = text,
+			.data = std::move(data),
+			.type = entityType,
+		});
 	} else if (entityType == EntityType::Url
 		|| entityType == EntityType::Email
 		|| entityType == EntityType::Mention
@@ -679,149 +565,6 @@ void Parser::skipBadEntities() {
 			++_waitingEntity;
 		}
 	}
-}
-
-bool Parser::readSkipBlockCommand() {
-	const QChar *afterCmd = textSkipCommand(_ptr, _end, _links.size() < 0x7FFF);
-	if (afterCmd == _ptr) {
-		return false;
-	}
-
-	ushort cmd = (++_ptr)->unicode();
-	++_ptr;
-
-	switch (cmd) {
-	case TextCommandSkipBlock:
-		createSkipBlock(_ptr->unicode(), (_ptr + 1)->unicode());
-	break;
-	}
-
-	_ptr = afterCmd;
-	return true;
-}
-
-bool Parser::readCommand() {
-	const QChar *afterCmd = textSkipCommand(_ptr, _end, _links.size() < 0x7FFF);
-	if (afterCmd == _ptr) {
-		return false;
-	}
-
-	ushort cmd = (++_ptr)->unicode();
-	++_ptr;
-
-	switch (cmd) {
-	case TextCommandBold:
-		if (!(_flags & TextBlockFBold)) {
-			createBlock();
-			_flags |= TextBlockFBold;
-		}
-	break;
-
-	case TextCommandNoBold:
-		if (_flags & TextBlockFBold) {
-			createBlock();
-			_flags &= ~TextBlockFBold;
-		}
-	break;
-
-	case TextCommandSemibold:
-	if (!(_flags & TextBlockFSemibold)) {
-		createBlock();
-		_flags |= TextBlockFSemibold;
-	}
-	break;
-
-	case TextCommandNoSemibold:
-	if (_flags & TextBlockFSemibold) {
-		createBlock();
-		_flags &= ~TextBlockFSemibold;
-	}
-	break;
-
-	case TextCommandItalic:
-		if (!(_flags & TextBlockFItalic)) {
-			createBlock();
-			_flags |= TextBlockFItalic;
-		}
-	break;
-
-	case TextCommandNoItalic:
-		if (_flags & TextBlockFItalic) {
-			createBlock();
-			_flags &= ~TextBlockFItalic;
-		}
-	break;
-
-	case TextCommandUnderline:
-		if (!(_flags & TextBlockFUnderline)) {
-			createBlock();
-			_flags |= TextBlockFUnderline;
-		}
-	break;
-
-	case TextCommandNoUnderline:
-		if (_flags & TextBlockFUnderline) {
-			createBlock();
-			_flags &= ~TextBlockFUnderline;
-		}
-	break;
-
-	case TextCommandStrikeOut:
-		if (!(_flags & TextBlockFStrikeOut)) {
-			createBlock();
-			_flags |= TextBlockFStrikeOut;
-		}
-		break;
-
-	case TextCommandNoStrikeOut:
-		if (_flags & TextBlockFStrikeOut) {
-			createBlock();
-			_flags &= ~TextBlockFStrikeOut;
-		}
-		break;
-
-	case TextCommandLinkIndex:
-		if (_ptr->unicode() != _lnkIndex) {
-			createBlock();
-			_lnkIndex = _ptr->unicode();
-		}
-	break;
-
-	case TextCommandLinkText: {
-		createBlock();
-		int32 len = _ptr->unicode();
-		_links.push_back(EntityLinkData{
-			.data = QString(++_ptr, len),
-			.type = EntityType::CustomUrl
-		});
-		_lnkIndex = kStringLinkIndexShift + _links.size();
-	} break;
-
-	case TextCommandSpoiler: {
-		if (!_spoilerIndex) {
-			createBlock();
-			_spoilers.push_back(EntityLinkData{
-				.data = QString::number(_spoilers.size() + 1),
-				.type = EntityType::Spoiler,
-			});
-			_spoilerIndex = _spoilers.size();
-		}
-	} break;
-
-	case TextCommandNoSpoiler:
-		if (_spoilerIndex == _spoilers.size()) {
-			createBlock();
-			_spoilerIndex = 0;
-		}
-	break;
-
-	case TextCommandSkipBlock:
-		createSkipBlock(_ptr->unicode(), (_ptr + 1)->unicode());
-	break;
-	}
-
-	_ptr = afterCmd;
-	return true;
 }
 
 void Parser::parseCurrentChar() {
@@ -954,7 +697,7 @@ void Parser::parse(const TextParseOptions &options) {
 	_t->_text.reserve(_end - _ptr);
 
 	for (; _ptr <= _end; ++_ptr) {
-		while (checkEntities() || (_rich && checkCommand())) {
+		while (checkEntities()) {
 		}
 		parseCurrentChar();
 		parseEmojiFromCurrent();
@@ -964,7 +707,6 @@ void Parser::parse(const TextParseOptions &options) {
 		}
 	}
 	createBlock();
-	checkForElidedSkipBlock();
 	finalize(options);
 }
 
@@ -973,32 +715,36 @@ void Parser::trimSourceRange() {
 		_source.entities,
 		_end - _start);
 
-	while (_ptr != _end && IsTrimmed(*_ptr, _rich) && _ptr != _start + firstMonospaceOffset) {
+	while (_ptr != _end && IsTrimmed(*_ptr) && _ptr != _start + firstMonospaceOffset) {
 		++_ptr;
 	}
-	while (_ptr != _end && IsTrimmed(*(_end - 1), _rich)) {
+	while (_ptr != _end && IsTrimmed(*(_end - 1))) {
 		--_end;
 	}
 }
 
-void Parser::checkForElidedSkipBlock() {
-	if (!_sumFinished || !_rich) {
-		return;
-	}
-	// We could've skipped the final skip block command.
-	for (; _ptr < _end; ++_ptr) {
-		if (*_ptr == TextCommand && readSkipBlockCommand()) {
-			break;
-		}
-	}
-}
+// void Parser::checkForElidedSkipBlock() {
+// 	if (!_sumFinished || !_rich) {
+// 		return;
+// 	}
+// 	// We could've skipped the final skip block command.
+// 	for (; _ptr < _end; ++_ptr) {
+// 		if (*_ptr == TextCommand && readSkipBlockCommand()) {
+// 			break;
+// 		}
+// 	}
+// }
 
 void Parser::finalize(const TextParseOptions &options) {
-	_t->_links.resize(_maxLnkIndex);
-	_t->_spoilers.resize(_maxSpoilerIndex);
+	_t->_links.resize(_maxLnkIndex + _maxShiftedLnkIndex);
+	auto monoLnk = uint16(1);
+	struct {
+		uint16 mono = 0;
+		uint16 lnk = 0;
+	} lastHandlerIndex;
 	for (auto &block : _t->_blocks) {
 		const auto spoilerIndex = block->spoilerIndex();
-		if (spoilerIndex) {
+		if (spoilerIndex && (_t->_spoilers.size() < spoilerIndex)) {
 			_t->_spoilers.resize(spoilerIndex);
 			const auto handler = (options.flags & TextParseLinks)
 				? std::make_shared<SpoilerClickHandler>()
@@ -1007,22 +753,53 @@ void Parser::finalize(const TextParseOptions &options) {
 		}
 		const auto shiftedIndex = block->lnkIndex();
 		if (shiftedIndex <= kStringLinkIndexShift) {
+			if (IsMono(block->flags()) && (monoLnk <= _monos.size())) {
+				{
+					const auto ptr = _monos[monoLnk - 1].data.constData();
+					const auto entityEnd = int(ptr->unicode());
+					const auto singleLine = (int((ptr + 1)->unicode()) == 1);
+					if (!singleLine) {
+						monoLnk++;
+						continue;
+					}
+					if (block->from() >= entityEnd) {
+						monoLnk++;
+					}
+				}
+				const auto monoIndex = _maxLnkIndex
+					+ _maxShiftedLnkIndex
+					+ monoLnk;
+				block->setLnkIndex(monoIndex);
+
+				if (lastHandlerIndex.mono == monoIndex) {
+					continue; // Optimization.
+				}
+				const auto handler = Integration::Instance().createLinkHandler(
+					_monos[monoLnk - 1],
+					_context);
+				_t->_links.resize(monoIndex);
+				if (handler) {
+					_t->setLink(monoIndex, handler);
+				}
+				lastHandlerIndex.mono = monoIndex;
+			}
 			continue;
 		}
 		const auto realIndex = (shiftedIndex - kStringLinkIndexShift);
 		const auto index = _maxLnkIndex + realIndex;
 		block->setLnkIndex(index);
-		if (_t->_links.size() >= index) {
-			continue;
+		if (lastHandlerIndex.lnk == index) {
+			continue; // Optimization.
 		}
 
-		_t->_links.resize(index);
+		// _t->_links.resize(index);
 		const auto handler = Integration::Instance().createLinkHandler(
 			_links[realIndex - 1],
 			_context);
 		if (handler) {
 			_t->setLink(index, handler);
 		}
+		lastHandlerIndex.lnk = index;
 	}
 	_t->_links.squeeze();
 	_t->_spoilers.squeeze();
@@ -1748,7 +1525,9 @@ private:
 						QFixed from;
 						QFixed width;
 					} fillSpoiler;
-					if (_localFrom + si.position < _selection.to) {
+					if (_background.selectActiveBlock) {
+						fillSelect = { x, x + si.width };
+					} else if (_localFrom + si.position < _selection.to) {
 						auto chFrom = _str + currentBlock->from();
 						auto chTo = chFrom + ((nextBlock ? nextBlock->from() : _t->_text.size()) - currentBlock->from());
 						if (_localFrom + si.position >= _selection.from) { // could be without space
@@ -1890,7 +1669,9 @@ private:
 				auto hasSelected = false;
 				auto hasNotSelected = true;
 				auto selectedRect = QRect();
-				if (_localFrom + itemStart < _selection.to && _localFrom + itemEnd > _selection.from) {
+				if (_background.selectActiveBlock) {
+					fillSelectRange(x, x + itemWidth);
+				} else if (_localFrom + itemStart < _selection.to && _localFrom + itemEnd > _selection.from) {
 					hasSelected = true;
 					auto selX = x;
 					auto selWidth = itemWidth;
@@ -1939,8 +1720,10 @@ private:
 					? fillSpoilerOpacity()
 					: 0.;
 				const auto opacity = _p->opacity();
-				if (spoilerOpacity < 1.) {
-					if (hasSpoiler) {
+				const auto isElidedBlock = (!rtl)
+					&& (_indexOfElidedBlock == blockIndex);
+				if ((spoilerOpacity < 1.) || isElidedBlock) {
+					if (hasSpoiler && !isElidedBlock) {
 						_p->setOpacity(opacity * (1. - spoilerOpacity));
 					}
 					if (Q_UNLIKELY(hasSelected)) {
@@ -2046,7 +1829,9 @@ private:
 				: (blockIndex > 0)
 				? _t->_blocks[blockIndex - 1]->spoilerIndex()
 				: 0;
-			const auto will = (positionTill < blockEnd)
+			const auto will = elideOffset
+				? 0
+				: (positionTill < blockEnd)
 				? now
 				: nextBlock
 				? nextBlock->spoilerIndex()
@@ -2241,7 +2026,7 @@ private:
 			return f;
 		}
 		auto result = f;
-		if ((flags & TextBlockFPre) || (flags & TextBlockFCode)) {
+		if (IsMono(flags)) {
 			result = result->monospace();
 		} else {
 			if (flags & TextBlockFBold) {
@@ -2853,6 +2638,8 @@ private:
 	void applyBlockProperties(const AbstractBlock *block) {
 		eSetFont(block);
 		if (_p) {
+			const auto isMono = IsMono(block->flags());
+			_background = {};
 			if (block->spoilerIndex()) {
 				const auto handler
 					= _t->_spoilers.at(block->spoilerIndex() - 1);
@@ -2877,15 +2664,19 @@ private:
 						*_background.color);
 					mutableCache.color = (*_background.color)->c;
 				}
-			} else {
-				_background = {};
 			}
-			if (block->lnkIndex()) {
-				_currentPen = &_textPalette->linkFg->p;
-				_currentPenSelected = &_textPalette->selectLinkFg->p;
-			} else if ((block->flags() & TextBlockFCode) || (block->flags() & TextBlockFPre)) {
+			if (isMono && block->lnkIndex() && !_background.inFront) {
+				_background.selectActiveBlock = ClickHandler::showAsPressed(
+					_t->_links.at(block->lnkIndex() - 1));
+			}
+
+			if (isMono) {
 				_currentPen = &_textPalette->monoFg->p;
 				_currentPenSelected = &_textPalette->selectMonoFg->p;
+			} else if (block->lnkIndex()
+				|| (block->flags() & TextBlockFPlainLink)) {
+				_currentPen = &_textPalette->linkFg->p;
+				_currentPenSelected = &_textPalette->selectLinkFg->p;
 			} else {
 				_currentPen = &_originalPen;
 				_currentPenSelected = &_originalPenSelected;
@@ -2909,6 +2700,8 @@ private:
 		bool inFront = false;
 		crl::time startMs = 0;
 		uint16 spoilerIndex = 0;
+
+		bool selectActiveBlock = false; // For monospace.
 	} _background;
 	int _yFrom = 0;
 	int _yTo = 0;
@@ -2955,20 +2748,16 @@ private:
 String::String(int32 minResizeWidth) : _minResizeWidth(minResizeWidth) {
 }
 
-String::String(const style::TextStyle &st, const QString &text, const TextParseOptions &options, int32 minResizeWidth, bool richText)
+String::String(const style::TextStyle &st, const QString &text, const TextParseOptions &options, int32 minResizeWidth)
 : _minResizeWidth(minResizeWidth) {
-	if (richText) {
-		setRichText(st, text, options);
-	} else {
-		setText(st, text, options);
-	}
+	setText(st, text, options);
 }
 
 void String::setText(const style::TextStyle &st, const QString &text, const TextParseOptions &options) {
 	_st = &st;
 	clear();
 	{
-		Parser parser(this, text, options, {});
+		Parser parser(this, { text }, options, {});
 	}
 	recountNaturalSize(true, options.dir);
 }
@@ -3130,11 +2919,6 @@ void String::setMarkedText(const style::TextStyle &st, const TextWithEntities &t
 		Parser parser(this, textWithEntities, options, context);
 	}
 	recountNaturalSize(true, options.dir);
-}
-
-void String::setRichText(const style::TextStyle &st, const QString &text, TextParseOptions options) {
-	options.flags |= TextParseRichText;
-	setText(st, text, options);
 }
 
 void String::setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk) {
@@ -3397,6 +3181,36 @@ TextSelection String::adjustSelection(TextSelection selection, TextSelectType se
 	if (from < _text.size() && from <= to) {
 		if (to > _text.size()) to = _text.size();
 		if (selectType == TextSelectType::Paragraphs) {
+
+			// Full selection of monospace entity.
+			for (const auto &b : _blocks) {
+				if (b->from() < from) {
+					continue;
+				}
+				if (!IsMono(b->flags())) {
+					break;
+				}
+				const auto &entities = toTextWithEntities().entities;
+				const auto eIt = ranges::find_if(entities, [&](
+						const EntityInText &e) {
+					return (e.type() == EntityType::Pre
+							|| e.type() == EntityType::Code)
+						&& (from >= e.offset())
+						&& ((e.offset() + e.length()) >= to);
+				});
+				if (eIt != entities.end()) {
+					from = eIt->offset();
+					to = eIt->offset() + eIt->length();
+					while (to > 0 && IsSpace(_text.at(to - 1))) {
+						--to;
+					}
+					if (to >= from) {
+						return { from, to };
+					}
+				}
+				break;
+			}
+
 			if (!IsParagraphSeparator(_text.at(from))) {
 				while (from > 0 && !IsParagraphSeparator(_text.at(from - 1))) {
 					--from;
@@ -3576,6 +3390,7 @@ TextForMimeData String::toText(
 			{ TextBlockFBold, EntityType::Bold },
 			{ TextBlockFSemibold, EntityType::Semibold },
 			{ TextBlockFUnderline, EntityType::Underline },
+			{ TextBlockFPlainLink, EntityType::PlainLink },
 			{ TextBlockFStrikeOut, EntityType::StrikeOut },
 			{ TextBlockFCode, EntityType::Code }, // #TODO entities
 			{ TextBlockFPre, EntityType::Pre },
@@ -3784,8 +3599,7 @@ bool IsAlmostLinkEnd(QChar ch) {
 }
 
 bool IsLinkEnd(QChar ch) {
-	return (ch == TextCommand)
-		|| IsBad(ch)
+	return IsBad(ch)
 		|| IsSpace(ch)
 		|| IsNewline(ch)
 		|| ch.isLowSurrogate()
@@ -3797,9 +3611,9 @@ bool IsNewline(QChar ch) {
 		|| (ch == 156);
 }
 
-bool IsSpace(QChar ch, bool rich) {
+bool IsSpace(QChar ch) {
 	return ch.isSpace()
-		|| (ch < 32 && !(rich && ch == TextCommand))
+		|| (ch < 32)
 		|| (ch == QChar::ParagraphSeparator)
 		|| (ch == QChar::LineSeparator)
 		|| (ch == QChar::ObjectReplacementCharacter)
@@ -3829,9 +3643,8 @@ bool IsReplacedBySpace(QChar ch) {
 		|| (ch >= 8232 && ch <= 8237);
 }
 
-bool IsTrimmed(QChar ch, bool rich) {
-	return (!rich || ch != TextCommand)
-		&& (IsSpace(ch) || IsBad(ch));
+bool IsTrimmed(QChar ch) {
+	return (IsSpace(ch) || IsBad(ch));
 }
 
 } // namespace Text

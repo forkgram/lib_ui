@@ -30,6 +30,10 @@ inline constexpr auto Upper = details::ToUpperType{};
 [[nodiscard]] TextWithEntities Link(
 	const QString &text,
 	const QString &url = "internal:action");
+[[nodiscard]] TextWithEntities PlainLink(const QString &text);
+[[nodiscard]] TextWithEntities Wrapped(
+	TextWithEntities text,
+	EntityType type);
 [[nodiscard]] TextWithEntities RichLangValue(const QString &text);
 [[nodiscard]] inline TextWithEntities WithEntities(const QString &text) {
 	return { text };
@@ -64,6 +68,14 @@ inline constexpr auto Upper = details::ToUpperType{};
 [[nodiscard]] inline auto ToWithEntities() {
 	return rpl::map(WithEntities);
 }
+
+[[nodiscard]] TextWithEntities Mid(
+	const TextWithEntities &text,
+	int position,
+	int n = -1);
+[[nodiscard]] TextWithEntities Filtered(
+	const TextWithEntities &result,
+	const std::vector<EntityType> &types);
 
 } // namespace Text
 } // namespace Ui
