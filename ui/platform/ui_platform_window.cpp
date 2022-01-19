@@ -33,12 +33,36 @@ BasicWindowHelper::BasicWindowHelper(not_null<RpWidget*> window)
 	_window->setWindowFlag(Qt::Window);
 }
 
+void BasicWindowHelper::initInWindow(not_null<RpWindow*> window) {
+}
+
 not_null<RpWidget*> BasicWindowHelper::body() {
 	return _window;
 }
 
 QMargins BasicWindowHelper::frameMargins() {
 	return nativeFrameMargins();
+}
+
+int BasicWindowHelper::additionalContentPadding() const {
+	return 0;
+}
+
+rpl::producer<int> BasicWindowHelper::additionalContentPaddingValue() const {
+	return rpl::single(0);
+}
+
+auto BasicWindowHelper::hitTestRequests() const
+-> rpl::producer<not_null<HitTestRequest*>> {
+	return rpl::never<not_null<HitTestRequest*>>();
+}
+
+rpl::producer<HitTestResult> BasicWindowHelper::systemButtonOver() const {
+	return rpl::never<HitTestResult>();
+}
+
+rpl::producer<HitTestResult> BasicWindowHelper::systemButtonDown() const {
+	return rpl::never<HitTestResult>();
 }
 
 void BasicWindowHelper::setTitle(const QString &title) {

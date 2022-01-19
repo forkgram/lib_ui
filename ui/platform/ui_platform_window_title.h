@@ -20,8 +20,41 @@ namespace Ui {
 
 class IconButton;
 class PlainShadow;
+class RpWindow;
 
 namespace Platform {
+
+class TitleControls;
+
+enum class HitTestResult {
+	None = 0,
+	Client,
+	Minimize,
+	MaximizeRestore,
+	Close,
+	Caption,
+	Top,
+	TopRight,
+	Right,
+	BottomRight,
+	Bottom,
+	BottomLeft,
+	Left,
+	TopLeft,
+	OnTop,
+};
+
+struct HitTestRequest {
+	QPoint point;
+	HitTestResult result = HitTestResult::Client;
+};
+
+[[nodiscard]] bool SemiNativeSystemButtonProcessing();
+void SetupSemiNativeSystemButtons(
+	not_null<TitleControls*> controls,
+	not_null<RpWindow*> window,
+	rpl::lifetime &lifetime,
+	Fn<bool()> filter = nullptr);
 
 class TitleControls final {
 public:
@@ -37,6 +70,11 @@ public:
 	void setResizeEnabled(bool enabled);
 	void raise();
 
+	[[nodiscard]] HitTestResult hitTest(QPoint point) const;
+
+	void buttonOver(HitTestResult testResult);
+	void buttonDown(HitTestResult testResult);
+
 	enum class Control {
 		Unknown,
 		Minimize,
@@ -51,9 +89,11 @@ public:
 	};
 
 private:
+	class Button;
+
 	[[nodiscard]] not_null<RpWidget*> parent() const;
 	[[nodiscard]] not_null<QWidget*> window() const;
-	[[nodiscard]] Ui::IconButton *controlWidget(Control control) const;
+	[[nodiscard]] Button *controlWidget(Control control) const;
 
 	void init(Fn<void(bool maximized)> maximize);
 	void subscribeToStateChanges();
@@ -66,10 +106,10 @@ private:
 
 	not_null<const style::WindowTitle*> _st;
 
-	object_ptr<Ui::IconButton> _top;
-	object_ptr<Ui::IconButton> _minimize;
-	object_ptr<Ui::IconButton> _maximizeRestore;
-	object_ptr<Ui::IconButton> _close;
+	object_ptr<Button> _top;
+	object_ptr<Button> _minimize;
+	object_ptr<Button> _maximizeRestore;
+	object_ptr<Button> _close;
 
 	bool _topState = false;
 	bool _maximizedState = false;
@@ -103,6 +143,22 @@ private:
 	bool _mousePressed = false;
 
 };
+
+struct SeparateTitleControls {
+	SeparateTitleControls(
+		QWidget *parent,
+		const style::WindowTitle &st,
+		Fn<void(bool maximized)> maximize);
+
+	RpWidget wrap;
+	TitleControls controls;
+};
+
+[[nodiscard]] auto SetupSeparateTitleControls(
+	not_null<RpWindow*> window,
+	const style::WindowTitle &st,
+	Fn<void(bool maximized)> maximize = nullptr)
+-> std::unique_ptr<SeparateTitleControls>;
 
 } // namespace Platform
 } // namespace Ui
