@@ -15,7 +15,7 @@
 #include "base/platform/base_platform_info.h"
 #include "emoji_suggestions_helper.h"
 #include "styles/palette.h"
-#include "base/qt_adapters.h"
+#include "base/qt/qt_common_adapters.h"
 
 #include <QtWidgets/QCommonStyle>
 #include <QtWidgets/QScrollBar>
@@ -702,6 +702,7 @@ void RemoveDocumentTags(
 	format.setProperty(kTagProperty, QString());
 	format.setProperty(kReplaceTagId, QString());
 	format.setForeground(st.textFg);
+	format.setBackground(QBrush());
 	format.setFont(st.font);
 	cursor.mergeCharFormat(format);
 }
@@ -748,6 +749,7 @@ void ApplyTagFormat(QTextCharFormat &to, const QTextCharFormat &from) {
 	to.setProperty(kReplaceTagId, from.property(kReplaceTagId));
 	to.setFont(from.font());
 	to.setForeground(from.foreground());
+	to.setBackground(from.background());
 }
 
 // Returns the position of the first inserted tag or "changedEnd" value if none found.
@@ -1436,7 +1438,9 @@ void InputField::updatePalette() {
 
 				auto format = fragment.charFormat();
 				const auto tag = format.property(kTagProperty).toString();
-				format.setForeground(PrepareTagFormat(_st, tag).foreground());
+				const auto updatedFormat = PrepareTagFormat(_st, tag);
+				format.setForeground(updatedFormat.foreground());
+				format.setBackground(updatedFormat.background());
 				cursor.setPosition(fragment.position());
 				cursor.setPosition(till, QTextCursor::KeepAnchor);
 				cursor.mergeCharFormat(format);
