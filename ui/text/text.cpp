@@ -147,14 +147,21 @@ bool IsBad(QChar ch) {
 } // namespace Text
 } // namespace Ui
 
-const TextParseOptions _defaultOptions = {
+const TextParseOptions kDefaultTextOptions = {
 	TextParseLinks | TextParseMultiline, // flags
 	0, // maxw
 	0, // maxh
 	Qt::LayoutDirectionAuto, // dir
 };
 
-const TextParseOptions _textPlainOptions = {
+const TextParseOptions kMarkupTextOptions = {
+	TextParseLinks | TextParseMultiline | TextParseMarkdown, // flags
+	0, // maxw
+	0, // maxh
+	Qt::LayoutDirectionAuto, // dir
+};
+
+const TextParseOptions kPlainTextOptions = {
 	TextParseMultiline, // flags
 	0, // maxw
 	0, // maxh
@@ -565,8 +572,8 @@ bool Parser::processCustomIndex(uint16 index) {
 	if (url.isEmpty()) {
 		return false;
 	}
-	if (url.startsWith("internal:index") && url.back().isDigit()) {
-		const auto customIndex = uint16(url.back().unicode() - '0');
+	if (url.startsWith("internal:index")) {
+		const auto customIndex = uint16(url.back().unicode());
 		// if (customIndex != index) {
 			url = QString();
 			_linksIndexes.push_back(customIndex);

@@ -42,7 +42,7 @@ BoxLayerWidget::BoxLayerWidget(
 : LayerWidget(layer)
 , _layer(layer)
 , _content(std::move(content))
-, _roundRect(ImageRoundRadius::Small, st().bg) {
+, _roundRect(st::boxRadius, st().bg) {
 	_content->setParent(this);
 	_content->setDelegate(this);
 
@@ -217,6 +217,10 @@ void BoxLayerWidget::showBox(
 	_layer->showBox(std::move(box), options, animated);
 }
 
+void BoxLayerWidget::hideLayer() {
+	_layer->hideLayers(anim::type::normal);
+}
+
 void BoxLayerWidget::updateSize() {
 	setDimensions(width(), _maxContentHeight);
 }
@@ -270,6 +274,7 @@ QPointer<RoundButton> BoxLayerWidget::addButton(
 		const style::RoundButton &st) {
 	_buttons.emplace_back(this, std::move(text), st);
 	auto result = QPointer<RoundButton>(_buttons.back());
+	result->setTextTransform(RoundButton::TextTransform::NoTransform);
 	result->setClickedCallback(std::move(clickCallback));
 	result->show();
 	result->widthValue(
@@ -285,6 +290,7 @@ QPointer<RoundButton> BoxLayerWidget::addLeftButton(
 		const style::RoundButton &st) {
 	_leftButton = object_ptr<RoundButton>(this, std::move(text), st);
 	auto result = QPointer<RoundButton>(_leftButton);
+	result->setTextTransform(RoundButton::TextTransform::NoTransform);
 	result->setClickedCallback(std::move(clickCallback));
 	result->show();
 	result->widthValue(
@@ -377,14 +383,19 @@ int BoxLayerWidget::countFullHeight() const {
 }
 
 int BoxLayerWidget::contentTop() const {
-	return hasTitle() ? titleHeight() : (_noContentMargin ? 0 : st::boxTopMargin);
+	return hasTitle()
+		? titleHeight()
+		: _noContentMargin
+		?
+		0
+		: st::boxTopMargin;
 }
 
 void BoxLayerWidget::resizeEvent(QResizeEvent *e) {
 	updateButtonsPositions();
 	updateTitlePosition();
 
-	auto top = contentTop();
+	const auto top = contentTop();
 	_content->resize(width(), height() - top - buttonsHeight());
 	_content->moveToLeft(0, top);
 
