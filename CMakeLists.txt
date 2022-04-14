@@ -27,7 +27,7 @@ generate_emoji(lib_ui emoji.txt emoji_suggestions/emoji_autocomplete.json)
 set_target_properties(lib_ui PROPERTIES AUTOMOC ON)
 target_prepare_qrc(lib_ui)
 
-target_precompile_headers(lib_ui PRIVATE ${src_loc}/ui/ui_pch.h)
+target_precompile_headers(lib_ui PRIVATE $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:${src_loc}/ui/ui_pch.h>)
 nice_target_sources(lib_ui ${src_loc}
 PRIVATE
     ${style_files}
@@ -98,6 +98,7 @@ PRIVATE
     ui/paint/blobs_linear.cpp
     ui/paint/blobs_linear.h
     ui/platform/linux/ui_linux_wayland_integration.cpp
+    ui/platform/linux/ui_linux_wayland_integration_dummy.cpp
     ui/platform/linux/ui_linux_wayland_integration.h
     ui/platform/linux/ui_window_linux.cpp
     ui/platform/linux/ui_window_linux.h
@@ -170,12 +171,16 @@ PRIVATE
     ui/widgets/checkbox.h
     ui/widgets/dropdown_menu.cpp
     ui/widgets/dropdown_menu.h
+    ui/widgets/icon_button_with_text.cpp
+    ui/widgets/icon_button_with_text.h
     ui/widgets/inner_dropdown.cpp
     ui/widgets/inner_dropdown.h
     ui/widgets/input_fields.cpp
     ui/widgets/input_fields.h
     ui/widgets/labels.cpp
     ui/widgets/labels.h
+    ui/widgets/fields/time_part_input.cpp
+    ui/widgets/fields/time_part_input.h
     ui/widgets/menu/menu.cpp
     ui/widgets/menu/menu.h
     ui/widgets/menu/menu_action.cpp
@@ -261,14 +266,30 @@ if (NOT DESKTOP_APP_USE_PACKAGED_FONTS)
 endif()
 
 if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
-    remove_target_sources(Telegram ${src_loc} ui/platform/linux/ui_linux_wayland_integration.cpp)
-    nice_target_sources(Telegram ${src_loc} PRIVATE ui/platform/linux/ui_linux_wayland_integration_dummy.cpp)
+    remove_target_sources(lib_ui ${src_loc} ui/platform/linux/ui_linux_wayland_integration.cpp)
 elseif(LINUX)
+    remove_target_sources(lib_ui ${src_loc} ui/platform/linux/ui_linux_wayland_integration_dummy.cpp)
+
+    if (DESKTOP_APP_QT6)
+        qt6_generate_wayland_protocol_client_sources(lib_ui
+        FILES
+            ${third_party_loc}/wayland-protocols/stable/xdg-shell/xdg-shell.xml
+        )
+    else()
+        message(FATAL_ERROR "This piece of cmake code is not ported to Qt 5")
+    endif()
+
     target_link_libraries(lib_ui
     PUBLIC
         desktop-app::lib_waylandshells
         desktop-app::external_kwayland
     )
+
+    if (DESKTOP_APP_USE_PACKAGED)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
+        target_link_libraries(lib_ui PRIVATE PkgConfig::WAYLAND_CLIENT)
+    endif()
 endif()
 
 target_include_directories(lib_ui
