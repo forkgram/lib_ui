@@ -44,19 +44,18 @@ public:
 	[[nodiscard]] auto systemButtonDown() const
 		-> rpl::producer<HitTestResult> override;
 
-private:
-	class NativeFilter;
-	friend class NativeFilter;
+	[[nodiscard]] bool nativeEvent(
+		const QByteArray &eventType,
+		void *message,
+		base::NativeEventResult *result) override;
 
+private:
 	void init();
-	void updateMargins();
+	void updateFrameMargins();
 	void updateWindowFrameColors();
 	void updateWindowFrameColors(bool active);
-	void updateSystemMenu();
-	void updateSystemMenu(Qt::WindowState state);
 	void initialShadowUpdate();
 	void updateCornersRounding();
-	void fixMaximizedWindow();
 	[[nodiscard]] bool handleNativeEvent(
 		UINT msg,
 		WPARAM wParam,
@@ -68,11 +67,11 @@ private:
 		LPARAM lParam,
 		LRESULT *result);
 	[[nodiscard]] bool fixedSize() const;
+	[[nodiscard]] bool frameMarginsSet() const;
 	[[nodiscard]] int systemButtonHitTest(HitTestResult result) const;
 	[[nodiscard]] HitTestResult systemButtonHitTest(int result) const;
 
 	[[nodiscard]] int titleHeight() const;
-	static not_null<NativeFilter*> GetNativeFilter();
 
 	const HWND _handle = nullptr;
 	const not_null<TitleWidget*> _title;
@@ -81,9 +80,8 @@ private:
 	rpl::event_stream<HitTestResult> _systemButtonOver;
 	rpl::event_stream<HitTestResult> _systemButtonDown;
 	std::optional<WindowShadow> _shadow;
-	QMargins _marginsDelta;
-	HMENU _menu = nullptr;
-	bool _updatingMargins = false;
+	rpl::variable<uint> _dpi;
+	rpl::variable<std::optional<QMargins>> _frameMargins;
 	bool _isFullScreen = false;
 
 };

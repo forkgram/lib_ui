@@ -47,6 +47,7 @@ PRIVATE
     ui/effects/cross_line.h
     ui/effects/fade_animation.cpp
     ui/effects/fade_animation.h
+    ui/effects/gradient.cpp
     ui/effects/gradient.h
     ui/effects/numbers_animation.cpp
     ui/effects/numbers_animation.h
@@ -187,6 +188,10 @@ PRIVATE
     ui/widgets/menu/menu.h
     ui/widgets/menu/menu_action.cpp
     ui/widgets/menu/menu_action.h
+    ui/widgets/menu/menu_add_action_callback.cpp
+    ui/widgets/menu/menu_add_action_callback.h
+    ui/widgets/menu/menu_add_action_callback_factory.cpp
+    ui/widgets/menu/menu_add_action_callback_factory.h
     ui/widgets/menu/menu_common.cpp
     ui/widgets/menu/menu_common.h
     ui/widgets/menu/menu_item_base.cpp
@@ -226,6 +231,8 @@ PRIVATE
     ui/abstract_button.h
     ui/basic_click_handlers.cpp
     ui/basic_click_handlers.h
+    ui/cached_special_layer_shadow_corners.cpp
+    ui/cached_special_layer_shadow_corners.h
     ui/click_handler.cpp
     ui/click_handler.h
     ui/delayed_activation.cpp
@@ -261,10 +268,6 @@ PRIVATE
     emoji_suggestions/emoji_suggestions_helper.h
 )
 
-if (DESKTOP_APP_USE_PACKAGED)
-    nice_target_sources(lib_ui ${src_loc} PRIVATE ui/text/qtextitemint.cpp)
-endif()
-
 if (NOT DESKTOP_APP_USE_PACKAGED_FONTS)
     nice_target_sources(lib_ui ${src_loc} PRIVATE fonts/fonts.qrc)
 endif()
@@ -286,14 +289,8 @@ elseif(LINUX)
     target_link_libraries(lib_ui
     PUBLIC
         desktop-app::lib_waylandshells
-        desktop-app::external_kwayland
+        desktop-app::external_wayland_client
     )
-
-    if (DESKTOP_APP_USE_PACKAGED)
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
-        target_link_libraries(lib_ui PRIVATE PkgConfig::WAYLAND_CLIENT)
-    endif()
 endif()
 
 target_include_directories(lib_ui

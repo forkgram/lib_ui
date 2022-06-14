@@ -13,6 +13,7 @@
 #include "ui/painter.h"
 #include "styles/style_widgets.h"
 #include "styles/style_layers.h"
+#include "styles/palette.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QWindow>
@@ -24,6 +25,10 @@ namespace {
 
 [[nodiscard]] const style::Shadow &Shadow() {
 	return st::callShadow;
+}
+
+[[nodiscard]] int Radius() {
+	return st::callRadius;
 }
 
 } // namespace
@@ -63,6 +68,13 @@ rpl::producer<HitTestResult> BasicWindowHelper::systemButtonOver() const {
 
 rpl::producer<HitTestResult> BasicWindowHelper::systemButtonDown() const {
 	return rpl::never<HitTestResult>();
+}
+
+bool BasicWindowHelper::nativeEvent(
+		const QByteArray &eventType,
+		void *message,
+		base::NativeEventResult *result) {
+	return false;
 }
 
 void BasicWindowHelper::setTitle(const QString &title) {
@@ -181,7 +193,8 @@ void BasicWindowHelper::setupBodyTitleAreaEvents() {
 DefaultWindowHelper::DefaultWindowHelper(not_null<RpWidget*> window)
 : BasicWindowHelper(window)
 , _title(Ui::CreateChild<DefaultTitleWidget>(window.get()))
-, _body(Ui::CreateChild<RpWidget>(window.get())) {
+, _body(Ui::CreateChild<RpWidget>(window.get()))
+, _roundRect(Radius(), st::windowBg) {
 	init();
 }
 
@@ -196,29 +209,35 @@ void DefaultWindowHelper::init() {
 	rpl::combine(
 		window()->widthValue(),
 		_windowState.value(),
-		_title->shownValue()
+		_title->shownValue(),
+		TitleControlsLayoutValue()
 	) | rpl::start_with_next([=](
 			int width,
 			Qt::WindowStates windowState,
-			bool shown) {
+			bool shown,
+			TitleControls::Layout controlsLayout) {
 		const auto area = resizeArea();
 		_title->setGeometry(
 			area.left(),
 			area.top(),
 			width - area.left() - area.right(),
-			_title->st()->height);
+			_title->controlsGeometry().height()
+				? _title->st()->height
+				: 0);
 	}, _title->lifetime());
 
 	rpl::combine(
 		window()->sizeValue(),
 		_windowState.value(),
 		_title->heightValue(),
-		_title->shownValue()
+		_title->shownValue(),
+		TitleControlsLayoutValue()
 	) | rpl::start_with_next([=](
 			QSize size,
 			Qt::WindowStates windowState,
 			int titleHeight,
-			bool titleShown) {
+			bool titleShown,
+			TitleControls::Layout controlsLayout) {
 		const auto area = resizeArea();
 
 		const auto sizeWithoutMargins = size
@@ -230,34 +249,27 @@ void DefaultWindowHelper::init() {
 			area.top() + (titleShown ? titleHeight : 0));
 
 		_body->setGeometry(QRect(topLeft, sizeWithoutMargins));
+		updateRoundingOverlay();
 	}, _body->lifetime());
 
 	window()->paintRequest(
-	) | rpl::start_with_next([=] {
-		const auto area = resizeArea();
-
-		if (area.isNull()) {
-			return;
-		}
-
+	) | rpl::filter([=] {
+		return !hasShadow() && !resizeArea().isNull();
+	}) | rpl::start_with_next([=] {
 		Painter p(window());
-
-		if (hasShadow()) {
-			Ui::Shadow::paint(
-				p,
-				QRect(QPoint(), window()->size()).marginsRemoved(area),
-				window()->width(),
-				Shadow());
-		} else {
-			paintBorders(p);
-		}
+		paintBorders(p);
 	}, window()->lifetime());
 
 	rpl::combine(
 		window()->shownValue(),
+		_title->shownValue(),
 		_windowState.value()
-	) | rpl::start_with_next([=](bool shown, Qt::WindowStates windowState) {
+	) | rpl::start_with_next([=](
+			bool shown,
+			bool titleShown,
+			Qt::WindowStates windowState) {
 		if (shown) {
+			window()->windowHandle()->setFlag(Qt::FramelessWindowHint, titleShown);
 			updateWindowExtents();
 		}
 	}, window()->lifetime());
@@ -279,6 +291,52 @@ void DefaultWindowHelper::init() {
 	QCoreApplication::instance()->installEventFilter(this);
 }
 
+void DefaultWindowHelper::updateRoundingOverlay() {
+	if (!hasShadow() || resizeArea().isNull()) {
+		_roundingOverlay.destroy();
+		return;
+	} else if (_roundingOverlay) {
+		return;
+	}
+
+	_roundingOverlay.create(window());
+	_roundingOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_roundingOverlay->show();
+
+	window()->sizeValue(
+	) | rpl::start_with_next([=](QSize size) {
+		_roundingOverlay->setGeometry(QRect(QPoint(), size));
+	}, _roundingOverlay->lifetime());
+
+	_roundingOverlay->paintRequest(
+	) | rpl::filter([=](QRect clip) {
+		const auto rect = window()->rect().marginsRemoved(resizeArea());
+		const auto radius = Radius();
+		const auto radiusWithFix = radius - 1;
+		const auto radiusSize = QSize(radius, radius);
+		return clip.intersects(QRect(
+				rect.topLeft(),
+				radiusSize
+			)) || clip.intersects(QRect(
+				rect.topRight() - QPoint(radiusWithFix, 0),
+				radiusSize
+			)) || clip.intersects(QRect(
+				rect.bottomRight() - QPoint(0, radiusWithFix),
+				radiusSize
+			)) || clip.intersects(QRect(
+				rect.bottomRight() - QPoint(radiusWithFix, radiusWithFix),
+				radiusSize
+			)) || !rect.contains(clip);
+	}) | rpl::start_with_next([=] {
+		Painter p(_roundingOverlay);
+		const auto rect = window()->rect().marginsRemoved(resizeArea());
+		p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+		_roundRect.paint(p, rect, RectPart::AllCorners);
+		p.setCompositionMode(QPainter::CompositionMode_DestinationOver);
+		Shadow::paint(p, rect, window()->width(), Shadow());
+	}, _roundingOverlay->lifetime());
+}
+
 not_null<RpWidget*> DefaultWindowHelper::body() {
 	return _body;
 }
@@ -297,7 +355,8 @@ bool DefaultWindowHelper::hasShadow() const {
 QMargins DefaultWindowHelper::resizeArea() const {
 	if (window()->isMaximized()
 		|| window()->isFullScreen()
-		|| _title->isHidden()) {
+		|| _title->isHidden()
+		|| (!hasShadow() && !_title->controlsGeometry().height())) {
 		return QMargins();
 	}
 
@@ -375,9 +434,7 @@ void DefaultWindowHelper::setTitleStyle(const style::WindowTitle &st) {
 }
 
 void DefaultWindowHelper::setNativeFrame(bool enabled) {
-	window()->windowHandle()->setFlag(Qt::FramelessWindowHint, !enabled);
 	_title->setVisible(!enabled);
-	updateWindowExtents();
 }
 
 void DefaultWindowHelper::setMinimumSize(QSize size) {
@@ -441,13 +498,10 @@ void DefaultWindowHelper::paintBorders(QPainter &p) {
 
 void DefaultWindowHelper::updateWindowExtents() {
 	if (hasShadow() && !_title->isHidden()) {
-		Platform::SetWindowExtents(
-			window()->windowHandle(),
-			resizeArea());
-
+		SetWindowExtents(window(), resizeArea());
 		_extentsSet = true;
 	} else if (_extentsSet) {
-		Platform::UnsetWindowExtents(window()->windowHandle());
+		UnsetWindowExtents(window());
 		_extentsSet = false;
 	}
 }

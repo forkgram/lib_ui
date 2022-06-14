@@ -192,12 +192,9 @@ void TitleControls::init(Fn<void(bool maximized)> maximize) {
 	});
 	_close->setPointerCursor(false);
 
-	parent()->widthValue(
-	) | rpl::start_with_next([=](int width) {
-		updateControlsPosition();
-	}, _close->lifetime());
-
-	TitleControlsLayoutChanged(
+	rpl::combine(
+		parent()->widthValue(),
+		TitleControlsLayoutValue()
 	) | rpl::start_with_next([=] {
 		updateControlsPosition();
 	}, _close->lifetime());
@@ -249,10 +246,14 @@ void TitleControls::raise() {
 HitTestResult TitleControls::hitTest(QPoint point, int padding) const {
 	const auto test = [&](const object_ptr<Button> &button, bool close) {
 		return button && button->geometry().marginsAdded(
-			{ close ? padding : 0, padding, close ? padding : 0, 0 }
+			{ 0, padding, 0, 0 }
 		).contains(point);
 	};
-	if (test(_minimize, false)) {
+	if (::Platform::IsWindows11OrGreater()
+		&& !_maximizedState
+		&& (point.y() < style::ConvertScale(style::DevicePixelRatio()))) {
+		return HitTestResult::Top;
+	} else if (test(_minimize, false)) {
 		return HitTestResult::Minimize;
 	} else if (test(_maximizeRestore, false)) {
 		return HitTestResult::MaximizeRestore;
@@ -470,6 +471,10 @@ not_null<const style::WindowTitle*> DefaultTitleWidget::st() const {
 	return _controls.st();
 }
 
+QRect DefaultTitleWidget::controlsGeometry() const {
+	return _controls.geometry();
+}
+
 void DefaultTitleWidget::setText(const QString &text) {
 	window()->setWindowTitle(text);
 }
@@ -498,7 +503,7 @@ void DefaultTitleWidget::mousePressEvent(QMouseEvent *e) {
 	if (e->button() == Qt::LeftButton) {
 		_mousePressed = true;
 	} else if (e->button() == Qt::RightButton) {
-		ShowWindowMenu(window()->windowHandle());
+		ShowWindowMenu(window(), e->windowPos().toPoint());
 	}
 }
 
@@ -549,9 +554,9 @@ std::unique_ptr<SeparateTitleControls> SetupSeparateTitleControls(
 		controlsTop ? std::move(controlsTop) : rpl::single(0)
 	) | rpl::start_with_next([=](int width, int padding, int top) {
 		raw->wrap.setGeometry(
-			padding,
+			0,
 			top,
-			width - 2 * padding,
+			width,
 			raw->controls.geometry().height());
 	}, lifetime);
 

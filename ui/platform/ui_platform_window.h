@@ -7,6 +7,9 @@
 #pragma once
 
 #include "base/flags.h"
+#include "base/object_ptr.h"
+#include "base/qt/qt_common_adapters.h"
+#include "ui/round_rect.h"
 
 namespace style {
 struct WindowTitle;
@@ -46,6 +49,10 @@ public:
 		-> rpl::producer<HitTestResult>;
 	[[nodiscard]] virtual auto systemButtonDown() const
 		-> rpl::producer<HitTestResult>;
+	[[nodiscard]] virtual bool nativeEvent(
+		const QByteArray &eventType,
+		void *message,
+		base::NativeEventResult *result);
 	virtual void setTitle(const QString &title);
 	virtual void setTitleStyle(const style::WindowTitle &st);
 	virtual void setNativeFrame(bool enabled);
@@ -95,6 +102,7 @@ protected:
 
 private:
 	void init();
+	void updateRoundingOverlay();
 	[[nodiscard]] bool hasShadow() const;
 	[[nodiscard]] QMargins resizeArea() const;
 	[[nodiscard]] Qt::Edges edgesFromPos(const QPoint &pos) const;
@@ -106,6 +114,8 @@ private:
 
 	const not_null<DefaultTitleWidget*> _title;
 	const not_null<RpWidget*> _body;
+	RoundRect _roundRect;
+	object_ptr<RpWidget> _roundingOverlay = { nullptr };
 	bool _extentsSet = false;
 	rpl::variable<Qt::WindowStates> _windowState = Qt::WindowNoState;
 

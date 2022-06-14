@@ -39,12 +39,13 @@ void DisableSystemWindowResize(not_null<QWidget*> widget, QSize ratio);
 void DrainMainQueue(); // Needed only if UseMainQueueGeneric() is false.
 
 [[nodiscard]] bool WindowExtentsSupported();
-void SetWindowExtents(QWindow *window, const QMargins &extents);
-void UnsetWindowExtents(QWindow *window);
-bool ShowWindowMenu(QWindow *window);
+void SetWindowExtents(not_null<QWidget*> widget, const QMargins &extents);
+void UnsetWindowExtents(not_null<QWidget*> widget);
+void ShowWindowMenu(not_null<QWidget*> widget, const QPoint &point);
 
 [[nodiscard]] TitleControls::Layout TitleControlsLayout();
-[[nodiscard]] rpl::producer<> TitleControlsLayoutChanged();
+[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutValue();
+[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutChanged();
 void NotifyTitleControlsLayoutChanged();
 
 } // namespace Platform

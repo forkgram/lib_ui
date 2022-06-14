@@ -14,9 +14,6 @@
 #include <QtGui/QtEvents>
 #include <QWheelEvent>
 
-#include <private/qguiapplication_p.h>
-#include <private/qhighdpiscaling_p.h>
-
 #include <array>
 
 namespace Ui {
@@ -131,7 +128,7 @@ QImage GrabWidgetToImage(not_null<QWidget*> target, QRect rect, QColor bg) {
 	if (!target->testAttribute(Qt::WA_OpaquePaintEvent)) {
 		result.fill(bg);
 	}
-	{
+	if (rect.isValid()) {
 		QPainter p(&result);
 		RenderWidget(p, target, QPoint(), rect);
 	}
@@ -194,29 +191,24 @@ bool IsContentVisible(
 			return false;
 		}
 
-		const auto mappedRect = QHighDpi::toNativePixels(
-			rect.isNull()
-				? QRect(
-					widget->mapToGlobal(QPoint()),
-					widget->mapToGlobal(
-						QPoint(widget->width(), widget->height())))
-				: QRect(
-					widget->mapToGlobal(rect.topLeft()),
-					widget->mapToGlobal(rect.bottomRight())),
-			widget->window()->windowHandle());
+		const auto mappedRect = rect.isNull()
+			? QRect(
+				widget->mapTo(widget->window(), QPoint()),
+				widget->size())
+			: QRect(
+				widget->mapTo(widget->window(), rect.topLeft()),
+				rect.size());
 
-		const auto overlapped = Platform::IsOverlapped(widget, mappedRect);
+		const auto overlapped = Platform::IsOverlapped(
+			widget->window(),
+			mappedRect);
+
 		return overlapped.has_value() && !*overlapped;
 	}();
 
 	return activeOrNotOverlapped
 		&& widget->isVisible()
 		&& !widget->window()->isMinimized();
-}
-
-void DisableCustomScaling() {
-	QHighDpiScaling::setGlobalFactor(1);
-	QGuiApplicationPrivate::resetCachedDevicePixelRatio();
 }
 
 int WheelDirection(not_null<QWheelEvent*> e) {
