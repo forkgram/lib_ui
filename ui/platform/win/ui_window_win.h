@@ -51,11 +51,12 @@ public:
 
 private:
 	void init();
-	void updateFrameMargins();
+	void updateMargins();
 	void updateWindowFrameColors();
 	void updateWindowFrameColors(bool active);
 	void initialShadowUpdate();
 	void updateCornersRounding();
+	void fixMaximizedWindow();
 	[[nodiscard]] bool handleNativeEvent(
 		UINT msg,
 		WPARAM wParam,
@@ -67,7 +68,6 @@ private:
 		LPARAM lParam,
 		LRESULT *result);
 	[[nodiscard]] bool fixedSize() const;
-	[[nodiscard]] bool frameMarginsSet() const;
 	[[nodiscard]] int systemButtonHitTest(HitTestResult result) const;
 	[[nodiscard]] HitTestResult systemButtonHitTest(int result) const;
 
@@ -81,7 +81,8 @@ private:
 	rpl::event_stream<HitTestResult> _systemButtonDown;
 	std::optional<WindowShadow> _shadow;
 	rpl::variable<uint> _dpi;
-	rpl::variable<std::optional<QMargins>> _frameMargins;
+	QMargins _marginsDelta;
+	bool _updatingMargins = false;
 	bool _isFullScreen = false;
 
 };

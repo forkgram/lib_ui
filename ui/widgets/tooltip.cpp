@@ -13,6 +13,7 @@
 #include "base/platform/base_platform_info.h"
 
 #include <QtGui/QScreen>
+#include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 
 namespace Ui {
@@ -117,7 +118,8 @@ void Tooltip::popup(const QPoint &m, const QString &text, const style::Tooltip *
 
 	// adjust tooltip position
 	if (screen) {
-		setScreen(screen);
+		createWinId();
+		windowHandle()->setScreen(screen);
 		const auto r = screen->availableGeometry();
 		if (r.x() + r.width() - _st->skip < p.x() + s.width() && p.x() + s.width() > m.x()) {
 			p.setX(qMax(r.x() + r.width() - int32(_st->skip) - s.width(), m.x() - s.width()));
