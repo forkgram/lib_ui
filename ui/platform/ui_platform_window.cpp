@@ -70,13 +70,6 @@ rpl::producer<HitTestResult> BasicWindowHelper::systemButtonDown() const {
 	return rpl::never<HitTestResult>();
 }
 
-bool BasicWindowHelper::nativeEvent(
-		const QByteArray &eventType,
-		void *message,
-		base::NativeEventResult *result) {
-	return false;
-}
-
 void BasicWindowHelper::setTitle(const QString &title) {
 	_window->setWindowTitle(title);
 }
@@ -269,10 +262,10 @@ void DefaultWindowHelper::init() {
 			Qt::WindowStates windowState) {
 		if (const auto handle = window()->windowHandle()) {
 			handle->setFlag(Qt::FramelessWindowHint, titleShown);
+			updateWindowExtents();
 		} else {
 			window()->setWindowFlag(Qt::FramelessWindowHint, titleShown);
 		}
-		updateWindowExtents();
 	}, window()->lifetime());
 
 	window()->events() | rpl::start_with_next([=](not_null<QEvent*> e) {
