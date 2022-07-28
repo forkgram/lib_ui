@@ -15,12 +15,17 @@
 #include <QContextMenuEvent>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QTextEdit>
+#include <QtGui/QTextObjectInterface>
 #include <QtCore/QTimer>
 
 #include <rpl/variable.h>
 
 class QTouchEvent;
 class Painter;
+
+namespace Ui::Text {
+class CustomEmoji;
+} // namespace Ui::Text
 
 namespace Ui {
 
@@ -30,9 +35,17 @@ const auto kMonospaceSequence = QKeySequence("ctrl+shift+m");
 const auto kEditLinkSequence = QKeySequence("ctrl+k");
 const auto kSpoilerSequence = QKeySequence("ctrl+shift+p");
 
+using CustomEmojiFactory = Fn<std::unique_ptr<Text::CustomEmoji>(
+	QStringView,
+	Fn<void()>)>;
+
 class PopupMenu;
 
 void InsertEmojiAtCursor(QTextCursor cursor, EmojiPtr emoji);
+void InsertCustomEmojiAtCursor(
+	QTextCursor cursor,
+	const QString &text,
+	const QString &link);
 
 struct InstantReplaces {
 	struct Node {
@@ -143,6 +156,39 @@ private:
 
 };
 
+class CustomEmojiObject : public QObject, public QTextObjectInterface {
+	Q_OBJECT
+	Q_INTERFACES(QTextObjectInterface)
+
+public:
+	using Factory = Fn<std::unique_ptr<Text::CustomEmoji>(QStringView)>;
+
+	CustomEmojiObject(Factory factory, Fn<bool()> paused);
+	~CustomEmojiObject();
+
+	QSizeF intrinsicSize(
+		QTextDocument *doc,
+		int posInDocument,
+		const QTextFormat &format) override;
+	void drawObject(
+		QPainter *painter,
+		const QRectF &rect,
+		QTextDocument *doc,
+		int posInDocument,
+		const QTextFormat &format) override;
+
+	void setNow(crl::time now);
+	void clear();
+
+private:
+	Factory _factory;
+	Fn<bool()> _paused;
+	base::flat_map<uint64, std::unique_ptr<Text::CustomEmoji>> _emoji;
+	crl::time _now = 0;
+	int _skip = 0;
+
+};
+
 class InputField : public RpWidget {
 	Q_OBJECT
 
@@ -173,6 +219,8 @@ public:
 	static const QString kTagCode;
 	static const QString kTagPre;
 	static const QString kTagSpoiler;
+	static const QString kCustomEmojiTagStart;
+	static const int kCustomEmojiFormat;
 
 	InputField(
 		QWidget *parent,
@@ -223,12 +271,10 @@ public:
 
 	// If you need to make some preparations of tags before putting them to QMimeData
 	// (and then to clipboard or to drag-n-drop object), here is a strategy for that.
-	class TagMimeProcessor {
-	public:
-		virtual QString tagFromMimeTag(const QString &mimeTag) = 0;
-		virtual ~TagMimeProcessor() = default;
-	};
-	void setTagMimeProcessor(std::unique_ptr<TagMimeProcessor> &&processor);
+	void setTagMimeProcessor(Fn<QString(QStringView)> processor);
+	void setCustomEmojiFactory(
+		CustomEmojiFactory factory,
+		Fn<bool()> paused = nullptr);
 
 	struct EditLinkSelection {
 		int from = 0;
@@ -256,12 +302,19 @@ public:
 	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<bool> enabled);
 	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
-	void commitInstantReplacement(int from, int till, const QString &with);
+	void commitInstantReplacement(
+		int from,
+		int till,
+		const QString &with,
+		const QString &customEmojiData);
 	void commitMarkdownLinkEdit(
 		EditLinkSelection selection,
 		const QString &text,
 		const QString &link);
-	static bool IsValidMarkdownLink(QStringView link);
+	[[nodiscard]] static bool IsValidMarkdownLink(QStringView link);
+	[[nodiscard]] static bool IsCustomEmojiLink(QStringView link);
+	[[nodiscard]] static QString CustomEmojiLink(QStringView entityData);
+	[[nodiscard]] static QString CustomEmojiEntityData(QStringView link);
 
 	const QString &getLastText() const {
 		return _lastTextWithTags.text;
@@ -395,6 +448,7 @@ private:
 	void contextMenuEventInner(QContextMenuEvent *e, QMenu *m = nullptr);
 	void dropEventInner(QDropEvent *e);
 	void inputMethodEventInner(QInputMethodEvent *e);
+	void paintEventInner(QPaintEvent *e);
 
 	QMimeData *createMimeDataFromSelectionInner() const;
 	bool canInsertFromMimeDataInner(const QMimeData *source) const;
@@ -448,6 +502,7 @@ private:
 		int from,
 		int till,
 		const QString &with,
+		const QString &customEmojiData,
 		std::optional<QString> checkOriginal,
 		bool checkIfInMonospace);
 	bool commitMarkdownReplacement(
@@ -466,6 +521,7 @@ private:
 
 	bool revertFormatReplace();
 
+	void customEmojiRepaint();
 	void highlightMarkdown();
 
 	const style::InputField &_st;
@@ -489,6 +545,7 @@ private:
 
 	bool _forcePlaceholderHidden = false;
 	bool _reverseMarkdownReplacement = false;
+	bool _customEmojiRepaintScheduled = false;
 
 	// Tags list which we should apply while setText() call or insert from mime data.
 	TagList _insertedTags;
@@ -503,7 +560,8 @@ private:
 	// before _documentContentsChanges fire.
 	int _emojiSurrogateAmount = 0;
 
-	std::unique_ptr<TagMimeProcessor> _tagMimeProcessor;
+	Fn<QString(QStringView)> _tagMimeProcessor;
+	std::unique_ptr<CustomEmojiObject> _customEmojiObject;
 
 	SubmitSettings _submitSettings = SubmitSettings::Enter;
 	bool _markdownEnabled = false;

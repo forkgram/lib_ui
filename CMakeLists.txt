@@ -47,6 +47,8 @@ PRIVATE
     ui/effects/cross_line.h
     ui/effects/fade_animation.cpp
     ui/effects/fade_animation.h
+    ui/effects/frame_generator.cpp
+    ui/effects/frame_generator.h
     ui/effects/gradient.cpp
     ui/effects/gradient.h
     ui/effects/numbers_animation.cpp
