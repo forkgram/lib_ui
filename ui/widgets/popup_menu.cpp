@@ -302,6 +302,13 @@ void PopupMenu::handleCompositingUpdate() {
 	_padding = _useTransparency
 		? _st.shadow.extend
 		: style::margins(line, line, line, line);
+	if (windowHandle()) {
+		if (_useTransparency) {
+			Platform::SetWindowExtents(this, _padding);
+		} else {
+			Platform::UnsetWindowExtents(this);
+		}
+	}
 	_scroll->moveToLeft(_padding.left(), _padding.top());
 	handleMenuResize();
 	updateRoundingOverlay();
@@ -624,12 +631,12 @@ void PopupMenu::hideAnimated() {
 void PopupMenu::hideFast() {
 	if (isHidden()) return;
 
-	_hiding = false;
 	_a_opacity.stop();
 	hideFinished();
 }
 
 void PopupMenu::hideFinished() {
+	_hiding = false;
 	_a_show.stop();
 	_cache = QPixmap();
 	if (!isHidden()) {
@@ -716,7 +723,6 @@ void PopupMenu::opacityAnimationCallback() {
 	update();
 	if (!_a_opacity.animating()) {
 		if (_hiding) {
-			_hiding = false;
 			hideFinished();
 		} else {
 			showChildren();
