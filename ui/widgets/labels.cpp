@@ -269,8 +269,14 @@ void FlatLabel::setText(const QString &text) {
 	textUpdated();
 }
 
-void FlatLabel::setMarkedText(const TextWithEntities &textWithEntities) {
-	_text.setMarkedText(_st.style, textWithEntities, _labelMarkedOptions);
+void FlatLabel::setMarkedText(
+		const TextWithEntities &textWithEntities,
+		const std::any &context) {
+	_text.setMarkedText(
+		_st.style,
+		textWithEntities,
+		_labelMarkedOptions,
+		context);
 	textUpdated();
 }
 
@@ -370,6 +376,30 @@ void FlatLabel::setLinksTrusted() {
 
 void FlatLabel::setClickHandlerFilter(ClickHandlerFilter &&filter) {
 	_clickHandlerFilter = std::move(filter);
+}
+
+void FlatLabel::overrideLinkClickHandler(Fn<void()> handler) {
+	setClickHandlerFilter([=](
+			const ClickHandlerPtr &link,
+			Qt::MouseButton button) {
+		if (button != Qt::LeftButton) {
+			return true;
+		}
+		handler();
+		return false;
+	});
+}
+
+void FlatLabel::overrideLinkClickHandler(Fn<void(QString url)> handler) {
+	setClickHandlerFilter([=](
+			const ClickHandlerPtr &link,
+			Qt::MouseButton button) {
+		if (button != Qt::LeftButton) {
+			return true;
+		}
+		handler(link->dragText());
+		return false;
+	});
 }
 
 void FlatLabel::mouseMoveEvent(QMouseEvent *e) {

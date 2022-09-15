@@ -10,6 +10,7 @@
 #include "ui/widgets/menu/menu_item_base.h"
 #include "ui/widgets/menu/menu_separator.h"
 #include "ui/widgets/scroll_area.h"
+#include "styles/style_widgets.h"
 
 #include <QtGui/QtEvents>
 
@@ -93,21 +94,30 @@ not_null<QAction*> Menu::addAction(
 }
 
 not_null<QAction*> Menu::addAction(base::unique_qptr<ItemBase> widget) {
-	const auto action = widget->action();
-	_actions.emplace_back(action);
+	return insertAction(_actions.size(), std::move(widget));
+}
 
-	widget->setParent(this);
+not_null<QAction*> Menu::insertAction(
+		int position,
+		base::unique_qptr<ItemBase> widget) {
+	Expects(position >= 0 && position <= _actions.size());
+	Expects(position >= 0 && position <= _actionWidgets.size());
 
-	const auto top = _actionWidgets.empty()
-		? 0
-		: _actionWidgets.back()->y() + _actionWidgets.back()->height();
+	const auto raw = widget.get();
+	const auto action = raw->action();
+	_actions.insert(begin(_actions) + position, action);
 
-	widget->moveToLeft(0, top);
-	widget->show();
+	raw->setParent(this);
+	raw->show();
+	raw->setIndex(position);
+	for (auto i = position, to = int(_actionWidgets.size()); i != to; ++i) {
+		_actionWidgets[i]->setIndex(i + 1);
+	}
+	_actionWidgets.insert(
+		begin(_actionWidgets) + position,
+		std::move(widget));
 
-	widget->setIndex(_actionWidgets.size());
-
-	widget->selects(
+	raw->selects(
 	) | rpl::start_with_next([=](const CallbackData &data) {
 		if (!data.selected) {
 			if (!findSelectedAction()
@@ -127,16 +137,16 @@ not_null<QAction*> Menu::addAction(base::unique_qptr<ItemBase> widget) {
 		if (_activatedCallback) {
 			_activatedCallback(data);
 		}
-	}, widget->lifetime());
+	}, raw->lifetime());
 
-	widget->clicks(
+	raw->clicks(
 	) | rpl::start_with_next([=](const CallbackData &data) {
 		if (_triggeredCallback) {
 			_triggeredCallback(data);
 		}
-	}, widget->lifetime());
+	}, raw->lifetime());
 
-	QObject::connect(action.get(), &QAction::changed, widget.get(), [=] {
+	QObject::connect(action.get(), &QAction::changed, raw, [=] {
 		// Select an item under mouse that was disabled and became enabled.
 		if (_lastSelectedByMouse
 			&& !findSelectedAction()
@@ -144,9 +154,6 @@ not_null<QAction*> Menu::addAction(base::unique_qptr<ItemBase> widget) {
 			updateSelected(QCursor::pos());
 		}
 	});
-
-	const auto raw = widget.get();
-	_actionWidgets.push_back(std::move(widget));
 
 	const auto recountWidth = [=] {
 		return _forceWidth
@@ -191,10 +198,14 @@ not_null<QAction*> Menu::addAction(base::unique_qptr<ItemBase> widget) {
 	return action;
 }
 
-not_null<QAction*> Menu::addSeparator() {
+not_null<QAction*> Menu::addSeparator(const style::MenuSeparator *st) {
 	const auto separator = new QAction(this);
 	separator->setSeparator(true);
-	auto item = base::make_unique_q<Separator>(this, _st, separator);
+	auto item = base::make_unique_q<Separator>(
+		this,
+		_st,
+		st ? *st : _st.separator,
+		separator);
 	return addAction(std::move(item));
 }
 

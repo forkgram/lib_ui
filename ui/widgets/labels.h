@@ -122,7 +122,9 @@ public:
 	void setTextColorOverride(std::optional<QColor> color);
 
 	void setText(const QString &text);
-	void setMarkedText(const TextWithEntities &textWithEntities);
+	void setMarkedText(
+		const TextWithEntities &textWithEntities,
+		const std::any &context = {});
 	void setSelectable(bool selectable);
 	void setDoubleClickSelectsParagraph(bool doubleClickSelectsParagraph);
 	void setContextCopyText(const QString &copyText);
@@ -137,6 +139,8 @@ public:
 
 	using ClickHandlerFilter = Fn<bool(const ClickHandlerPtr&, Qt::MouseButton)>;
 	void setClickHandlerFilter(ClickHandlerFilter &&filter);
+	void overrideLinkClickHandler(Fn<void()> handler);
+	void overrideLinkClickHandler(Fn<void(QString url)> handler);
 
 	// ClickHandlerHost interface
 	void clickHandlerActiveChanged(const ClickHandlerPtr &action, bool active) override;

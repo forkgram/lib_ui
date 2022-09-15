@@ -61,10 +61,14 @@ PRIVATE
     ui/effects/radial_animation.h
     ui/effects/ripple_animation.cpp
     ui/effects/ripple_animation.h
+    ui/effects/round_area_with_shadow.cpp
+    ui/effects/round_area_with_shadow.h
     ui/effects/show_animation.cpp
     ui/effects/show_animation.h
     ui/effects/slide_animation.cpp
     ui/effects/slide_animation.h
+    ui/effects/spoiler_mess.cpp
+    ui/effects/spoiler_mess.h
     ui/gl/gl_detection.cpp
     ui/gl/gl_detection.h
     ui/gl/gl_image.cpp
@@ -147,13 +151,18 @@ PRIVATE
     ui/style/style_core_types.h
     ui/style/style_palette_colorizer.cpp
     ui/style/style_palette_colorizer.h
+    ui/text/custom_emoji_instance.cpp
+    ui/text/custom_emoji_instance.h
     ui/text/text.cpp
     ui/text/text.h
     ui/text/text_block.cpp
     ui/text/text_block.h
+    ui/text/text_custom_emoji.cpp
+    ui/text/text_custom_emoji.h
     ui/text/text_entity.cpp
     ui/text/text_entity.h
     ui/text/text_isolated_emoji.h
+    ui/text/text_spoiler_data.h
     ui/text/text_utilities.cpp
     ui/text/text_utilities.h
     ui/text/text_variant.cpp
@@ -231,6 +240,8 @@ PRIVATE
     ui/wrap/wrap.h
     ui/abstract_button.cpp
     ui/abstract_button.h
+    ui/animated_icon.cpp
+    ui/animated_icon.h
     ui/basic_click_handlers.cpp
     ui/basic_click_handlers.h
     ui/cached_special_layer_shadow_corners.cpp
@@ -286,7 +297,6 @@ elseif(LINUX)
 
     target_link_libraries(lib_ui
     PUBLIC
-        desktop-app::lib_waylandshells
         desktop-app::external_wayland_client
     )
 endif()
@@ -303,4 +313,6 @@ PUBLIC
 PRIVATE
     desktop-app::external_zlib
     desktop-app::external_jpeg
+    desktop-app::external_lz4
+    desktop-app::external_xxhash
 )
