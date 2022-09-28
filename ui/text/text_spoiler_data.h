@@ -6,17 +6,40 @@
 //
 #pragma once
 
-class SpoilerClickHandler;
+#include "ui/effects/spoiler_mess.h"
+#include "ui/effects/animations.h"
+#include "ui/click_handler.h"
 
 namespace Ui::Text {
 
-struct SpoilerData {
-	struct {
-		std::array<QImage, 4> corners;
-		QColor color;
-	} spoilerCache, spoilerShownCache;
+class String;
 
-	QVector<std::shared_ptr<SpoilerClickHandler>> links;
+class SpoilerClickHandler final : public ClickHandler {
+public:
+	SpoilerClickHandler(
+		not_null<String*> text,
+		Fn<bool(const ClickContext&)> filter);
+
+	[[nodiscard]] not_null<String*> text() const;
+	void setText(not_null<String*> text);
+
+	void onClick(ClickContext context) const override;
+
+private:
+	not_null<String*> _text;
+	const Fn<bool(const ClickContext &)> _filter;
+
+};
+
+struct SpoilerData {
+	explicit SpoilerData(Fn<void()> repaint)
+	: animation(std::move(repaint)) {
+	}
+
+	SpoilerAnimation animation;
+	std::shared_ptr<SpoilerClickHandler> link;
+	Animations::Simple revealAnimation;
+	bool revealed = false;
 };
 
 } // namespace Ui::Text
