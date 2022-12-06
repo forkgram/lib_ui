@@ -380,7 +380,16 @@ void PopupMenu::handleMenuResize() {
 	_scroll->resize(
 		newWidth - _padding.left() - _padding.right(),
 		scrollHeight);
-	resize(newWidth, _padding.top() + scrollHeight + _padding.bottom());
+	{
+		const auto newSize = QSize(
+			newWidth,
+			_padding.top() + scrollHeight + _padding.bottom());
+		if (::Platform::IsMac()) {
+			setMaximumSize(newSize);
+			setMinimumSize(newSize);
+		}
+		resize(newSize);
+	}
 	_inner = rect().marginsRemoved(_padding);
 }
 
@@ -879,6 +888,12 @@ void PopupMenu::deleteOnHide(bool del) {
 }
 
 void PopupMenu::popup(const QPoint &p) {
+	if (_clearLastSeparator) {
+		_menu->clearLastSeparator();
+		for (const auto &[action, submenu] : _submenus) {
+			submenu->menu()->clearLastSeparator();
+		}
+	}
 	if (prepareGeometryFor(p)) {
 		popupPrepared();
 		return;
@@ -1035,6 +1050,10 @@ void PopupMenu::showPrepared(TriggeredSource source) {
 	Platform::ShowOverAll(this);
 	raise();
 	activateWindow();
+}
+
+void PopupMenu::setClearLastSeparator(bool clear) {
+	_clearLastSeparator = clear;
 }
 
 PopupMenu::~PopupMenu() {
