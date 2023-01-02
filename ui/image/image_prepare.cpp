@@ -1283,6 +1283,10 @@ bool IsProgressiveJpeg(const QByteArray &bytes) {
 	}
 
 	jpeg_create_decompress(&info);
+	const auto guard = gsl::finally([&] {
+		jpeg_destroy_decompress(&info);
+	});
+
 	jpeg_mem_src(
 		&info,
 		reinterpret_cast<const unsigned char*>(bytes.data()),
@@ -1291,10 +1295,7 @@ bool IsProgressiveJpeg(const QByteArray &bytes) {
 		return false;
 	}
 
-	const auto result = (info.progressive_mode > 0);
-	jpeg_destroy_decompress(&info);
-
-	return result;
+	return (info.progressive_mode > 0);
 }
 
 } // namespace Images
