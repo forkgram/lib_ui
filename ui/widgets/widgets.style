@@ -932,7 +932,6 @@ defaultMultiSelectSearchField: InputField(defaultInputField) {
 	font: normalFont;
 }
 
-fieldSearchIcon: icon {{ "box_search", menuIconFg, point(9px, 8px) }};
 boxFieldSearchIcon: icon {{ "box_search", menuIconFg, point(10px, 9px) }};
 
 defaultMultiSelectSearchCancel: CrossButton {
@@ -980,7 +979,6 @@ defaultMultiSelect: MultiSelect {
 	fieldCancelSkip: 40px;
 }
 
-widgetSlideDuration: 200;
 widgetFadeDuration: 200;
 
 SettingsSlider {
@@ -1573,7 +1571,6 @@ sideBarButtonLockArcOffset: 2px;
 sideBarButtonLockSize: size(9px, 10px);
 sideBarButtonLockArcHeight: 3px;
 sideBarButtonLockBlockHeight: 5px;
-sideBarButtonLockLineHeight: 1px;
 sideBarButtonLockPenWidth: 3px;
 sideBarButtonLockPenWidthDivider: 2;
 
@@ -1601,4 +1598,8 @@ dropdownMenuWithIcons: DropdownMenu(defaultDropdownMenu) {
 		scrollPadding: margins(0px, 5px, 0px, 5px);
 	}
 	menu: menuWithIcons;
+}
+
+universalRippleAnimation: RippleAnimation(defaultRippleAnimation) {
+	color: shadowFg;
 }
