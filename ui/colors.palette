@@ -240,6 +240,7 @@ emojiPanCategories: #f7f7f7 | windowBg; // emoji panel categories background
 emojiPanHeaderFg: windowSubTextFg; // emoji panel section header text
 emojiPanHeaderBg: #fffffff2 | emojiPanBg; // emoji panel section header background
 emojiIconFg: #999999; // emoji category icon
+emojiIconFgActive: windowBgActive; // active emoji category icon
 emojiSubIconFgActive: #666666 | windowBoldFg; // active emoji subcategory icon
 stickerPanDeleteBg: #000000ff; // delete X button background for custom sent stickers in stickers panel (legacy)
 stickerPanDeleteFg: windowFgActive; // delete X button icon for custom sent stickers in stickers panel (legacy)
