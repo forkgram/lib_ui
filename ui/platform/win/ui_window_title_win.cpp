@@ -227,6 +227,7 @@ rpl::producer<int> TitleWidget::additionalPaddingValue() const {
 void TitleWidget::setAdditionalPadding(int padding) {
 	Expects(_paddingHelper != nullptr);
 
+	padding /= window()->devicePixelRatio();
 	if (_paddingHelper->padding.current() == padding) {
 		return;
 	}
