@@ -59,6 +59,7 @@ public:
 	virtual void showNormal();
 	virtual void close();
 
+	virtual int manualRoundingRadius() const;
 	void setBodyTitleArea(Fn<WindowTitleHitTestFlags(QPoint)> testMethod);
 
 protected:
@@ -91,6 +92,7 @@ public:
 	void setMinimumSize(QSize size) override;
 	void setFixedSize(QSize size) override;
 	void setGeometry(QRect rect) override;
+	int manualRoundingRadius() const override;
 
 protected:
 	bool eventFilter(QObject *obj, QEvent *e) override;
@@ -110,6 +112,8 @@ private:
 	const not_null<DefaultTitleWidget*> _title;
 	const not_null<RpWidget*> _body;
 	RoundRect _roundRect;
+	std::array<QImage, 4> _sides;
+	std::array<QImage, 4> _corners;
 	object_ptr<RpWidget> _roundingOverlay = { nullptr };
 	bool _extentsSet = false;
 	rpl::variable<Qt::WindowStates> _windowState = Qt::WindowNoState;
