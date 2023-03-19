@@ -12,7 +12,6 @@
 #include <QtGui/QtEvents>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QWindow>
-#include <QtGui/QPaintEngine>
 #include <QOpenGLWidget>
 
 namespace Ui::GL {
@@ -32,10 +31,13 @@ private:
 	void initializeGL() override;
 	void resizeGL(int w, int h) override;
 	void paintEvent(QPaintEvent *e) override;
+	void paintGL() override;
 	void callDeInit();
 
 	const std::unique_ptr<Renderer> _renderer;
 	QMetaObject::Connection _connection;
+	QSize _deviceSize;
+	bool _inPaintEvent = false;
 
 };
 
@@ -55,6 +57,7 @@ SurfaceOpenGL::SurfaceOpenGL(
 	std::unique_ptr<Renderer> renderer)
 : RpWidgetBase<QOpenGLWidget, SurfaceTraits>(parent)
 , _renderer(std::move(renderer)) {
+	setUpdateBehavior(QOpenGLWidget::PartialUpdate);
 }
 
 SurfaceOpenGL::~SurfaceOpenGL() {
@@ -76,22 +79,25 @@ void SurfaceOpenGL::initializeGL() {
 }
 
 void SurfaceOpenGL::resizeGL(int w, int h) {
+	_deviceSize = QSize(w, h) * devicePixelRatio();
 	_renderer->resize(this, *context()->functions(), w, h);
 }
 
 void SurfaceOpenGL::paintEvent(QPaintEvent *e) {
+	if (_inPaintEvent) {
+		return;
+	}
+	_inPaintEvent = true;
+	if (_deviceSize != size() * devicePixelRatio()) {
+		QResizeEvent event = { size(), size() };
+		resizeEvent(&event);
+	}
+	QOpenGLWidget::paintEvent(e);
+	_inPaintEvent = false;
+}
+
+void SurfaceOpenGL::paintGL() {
 	if (!updatesEnabled() || size().isEmpty() || !isValid()) {
-		return;
-	}
-	auto redirectOffset = QPoint();
-	const auto rpd = redirected(&redirectOffset);
-	const auto device = rpd ? rpd : static_cast<QPaintDevice*>(this);
-	const auto engine = device->paintEngine();
-	if (!engine) {
-		return;
-	}
-	engine->begin(device);
-	if (!isValid()) { // The call above could lose the context.
 		return;
 	}
 	const auto f = context()->functions();
@@ -100,9 +106,7 @@ void SurfaceOpenGL::paintEvent(QPaintEvent *e) {
 		f->glClear(GL_COLOR_BUFFER_BIT);
 	}
 	f->glDisable(GL_BLEND);
-	f->glViewport(0, 0, device->width(), device->height());
 	_renderer->paint(this, *f);
-	engine->end();
 }
 
 void SurfaceOpenGL::callDeInit() {
