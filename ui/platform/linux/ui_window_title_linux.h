@@ -6,10 +6,4 @@
 //
 #pragma once
 
-namespace Ui {
-
-void ActivateWindow(not_null<QWidget*> widget);
-void ActivateWindowDelayed(not_null<QWidget*> widget);
-void PreventDelayedActivation();
-
-} // namespace Ui
+#include "ui/platform/ui_platform_window_title.h"

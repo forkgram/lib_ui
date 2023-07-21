@@ -16,8 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/fade_wrap.h"
-#include "ui/toasts/common_toasts.h"
 #include "ui/platform/ui_platform_utility.h"
+#include "ui/layers/box_content.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/layers/show.h"
 #include "ui/painter.h"
@@ -37,10 +37,14 @@ class PanelShow final : public Show {
 public:
 	explicit PanelShow(not_null<SeparatePanel*> panel);
 	~PanelShow();
-	void showBox(
-		object_ptr<Ui::BoxContent> content,
-		Ui::LayerOptions options = Ui::LayerOption::KeepOther) const override;
-	void hideLayer() const override;
+
+	void showOrHideBoxOrLayer(
+		std::variant<
+			v::null_t,
+			object_ptr<BoxContent>,
+			std::unique_ptr<LayerWidget>> &&layer,
+		LayerOptions options,
+		anim::type animated) const override;
 	[[nodiscard]] not_null<QWidget*> toastParent() const override;
 	[[nodiscard]] bool valid() const override;
 	operator bool() const override;
@@ -56,20 +60,25 @@ PanelShow::PanelShow(not_null<SeparatePanel*> panel)
 
 PanelShow::~PanelShow() = default;
 
-void PanelShow::showBox(
-		object_ptr<Ui::BoxContent> content,
-		Ui::LayerOptions options) const {
-	if (const auto panel = _panel.data()) {
-		panel->showBox(std::move(content), options, anim::type::normal);
-	}
-}
-
-void PanelShow::hideLayer() const {
-	if (const auto panel = _panel.data()) {
-		panel->showBox(
-			object_ptr<Ui::BoxContent>{ nullptr },
-			Ui::LayerOption::CloseOther,
-			anim::type::normal);
+void PanelShow::showOrHideBoxOrLayer(
+		std::variant<
+			v::null_t,
+			object_ptr<BoxContent>,
+			std::unique_ptr<LayerWidget>> &&layer,
+		LayerOptions options,
+		anim::type animated) const {
+	using UniqueLayer = std::unique_ptr<LayerWidget>;
+	using ObjectBox = object_ptr<BoxContent>;
+	if (auto layerWidget = std::get_if<UniqueLayer>(&layer)) {
+		if (const auto panel = _panel.data()) {
+			panel->showLayer(std::move(*layerWidget), options, animated);
+		}
+	} else if (auto box = std::get_if<ObjectBox>(&layer)) {
+		if (const auto panel = _panel.data()) {
+			panel->showBox(std::move(*box), options, animated);
+		}
+	} else if (const auto panel = _panel.data()) {
+		panel->hideLayer(animated);
 	}
 }
 
@@ -399,26 +408,50 @@ int SeparatePanel::hideGetDuration() {
 }
 
 void SeparatePanel::showBox(
-		object_ptr<Ui::BoxContent> box,
-		Ui::LayerOptions options,
+		object_ptr<BoxContent> box,
+		LayerOptions options,
 		anim::type animated) {
-	if (box) {
-		ensureLayerCreated();
-		_layer->showBox(std::move(box), options, animated);
-	} else if (_layer) {
+	Expects(box != nullptr);
+
+	ensureLayerCreated();
+	_layer->showBox(std::move(box), options, animated);
+}
+
+void SeparatePanel::showLayer(
+		std::unique_ptr<LayerWidget> layer,
+		LayerOptions options,
+		anim::type animated) {
+	Expects(layer != nullptr);
+
+	ensureLayerCreated();
+	_layer->showLayer(std::move(layer), options, animated);
+}
+
+void SeparatePanel::hideLayer(anim::type animated) {
+	if (_layer) {
 		_layer->hideAll(animated);
 	}
 }
 
-std::shared_ptr<Show> SeparatePanel::uiShow() {
-	return std::make_shared<PanelShow>(this);
+base::weak_ptr<Toast::Instance> SeparatePanel::showToast(
+		Toast::Config &&config) {
+	return PanelShow(this).showToast(std::move(config));
 }
 
-void SeparatePanel::showToast(const TextWithEntities &text) {
-	Ui::ShowMultilineToast({
-		.parentOverride = this,
-		.text = text,
-	});
+base::weak_ptr<Toast::Instance> SeparatePanel::showToast(
+		TextWithEntities &&text,
+		crl::time duration) {
+	return PanelShow(this).showToast(std::move(text), duration);
+}
+
+base::weak_ptr<Toast::Instance> SeparatePanel::showToast(
+		const QString &text,
+		crl::time duration) {
+	return PanelShow(this).showToast(text, duration);
+}
+
+std::shared_ptr<Show> SeparatePanel::uiShow() {
+	return std::make_shared<PanelShow>(this);
 }
 
 void SeparatePanel::ensureLayerCreated() {
@@ -735,6 +768,10 @@ void SeparatePanel::mousePressEvent(QMouseEvent *e) {
 		if (dragArea.contains(e->pos())) {
 			const auto dragViaSystem = [&] {
 				if (windowHandle()->startSystemMove()) {
+					SendSynteticMouseEvent(
+						this,
+						QEvent::MouseButtonRelease,
+						Qt::LeftButton);
 					return true;
 				}
 				return false;

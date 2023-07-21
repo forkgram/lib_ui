@@ -134,17 +134,6 @@ void ShowWindowMenu(not_null<QWidget*> widget, const QPoint &point) {
 		MAKELPARAM(p.x, p.y));
 }
 
-TitleControls::Layout TitleControlsLayout() {
-	return TitleControls::Layout{
-		.right = {
-			TitleControls::Control::OnTop,
-			TitleControls::Control::Minimize,
-			TitleControls::Control::Maximize,
-			TitleControls::Control::Close,
-		}
-	};
-}
-
 void FixPopupMenuNativeEmojiPopup(not_null<PopupMenu*> menu) {
 	// Windows native emoji selector, that can be called by Win+. shortcut,
 	// is behaving strangely within an input field in a popup menu.
@@ -198,6 +187,16 @@ void FixPopupMenuNativeEmojiPopup(not_null<PopupMenu*> menu) {
 
 	QGuiApplication::instance()->installNativeEventFilter(
 		menu->lifetime().make_state<Filter>(menu));
+}
+
+void RegisterChildPopupHiding() {
+}
+
+bool SkipApplicationDeactivateEvent() {
+	return false;
+}
+
+void GotApplicationActivateEvent() {
 }
 
 } // namespace Ui::Platform

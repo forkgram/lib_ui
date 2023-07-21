@@ -147,14 +147,14 @@ std::optional<bool> IsOverlapped(
 	return false;
 }
 
-TitleControls::Layout TitleControlsLayout() {
-	return TitleControls::Layout{
-		.left = {
-			TitleControls::Control::Close,
-			TitleControls::Control::Minimize,
-			TitleControls::Control::Maximize,
-		}
-	};
+void RegisterChildPopupHiding() {
+}
+
+bool SkipApplicationDeactivateEvent() {
+	return false;
+}
+
+void GotApplicationActivateEvent() {
 }
 
 } // namespace Platform

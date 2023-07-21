@@ -105,7 +105,10 @@ public:
 				_dragStarted = _checkStartDrag();
 			} else if (([e type] == NSEventTypeLeftMouseDragged)
 					&& _dragStarted) {
-				return _checkPerformDrag([e window]);
+				if (_checkPerformDrag([e window])) {
+					return true;
+				}
+				_dragStarted = false;
 			}
 		}
 		return false;
@@ -420,6 +423,10 @@ void WindowHelper::setupBodyTitleAreaEvents() {
 
 void WindowHelper::close() {
 	_private->close();
+}
+
+const style::TextStyle &WindowHelper::titleTextStyle() const {
+	return _title->textStyle();
 }
 
 void WindowHelper::init() {

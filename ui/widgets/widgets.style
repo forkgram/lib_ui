@@ -255,6 +255,7 @@ PopupMenu {
 
 	menu: Menu;
 
+	radius: pixels;
 	duration: int;
 	showDuration: int;
 }
@@ -284,6 +285,7 @@ InputField {
 	border: pixels;
 	borderActive: pixels;
 	borderRadius: pixels;
+	borderDenominator: int;
 
 	font: font;
 	menu: PopupMenu;
@@ -369,6 +371,7 @@ RoundCheckbox {
 }
 
 RoundImageCheckbox {
+	selectExtendTwice: pixels;
 	imageRadius: pixels;
 	imageSmallRadius: pixels;
 	selectWidth: pixels;
@@ -555,6 +558,7 @@ WindowTitle {
 	bgActive: color;
 	fg: color;
 	fgActive: color;
+	style: TextStyle;
 	minimize: IconButton;
 	minimizeIconActive: icon;
 	minimizeIconActiveOver: icon;
@@ -707,6 +711,7 @@ defaultScrollArea: ScrollArea {
 	duration: 150;
 	hiding: 1000;
 }
+scrollBarMin: 40px;
 
 defaultSolidScroll: ScrollArea(defaultScrollArea) {
 	deltax: 5px;
@@ -855,6 +860,7 @@ defaultPopupMenu: PopupMenu {
 
 	menu: defaultMenu;
 
+	radius: 3px;
 	duration: 150;
 	showDuration: 200;
 }
@@ -883,6 +889,7 @@ defaultInputField: InputField {
 	border: 1px;
 	borderActive: 2px;
 	borderRadius: 0px;
+	borderDenominator: 1;
 
 	font: boxTextFont;
 	menu: defaultPopupMenu;
@@ -1066,6 +1073,7 @@ defaultPeerListCheck: RoundCheckbox(defaultRoundCheckbox) {
 	check: defaultPeerListCheckIcon;
 }
 defaultPeerListCheckbox: RoundImageCheckbox {
+	selectExtendTwice: 0px;
 	imageRadius: 21px;
 	imageSmallRadius: 18px;
 	selectWidth: 2px;
@@ -1276,23 +1284,6 @@ SearchFieldRow {
 	fieldCancelSkip: pixels;
 }
 
-InfoTopBar {
-	height: pixels;
-	back: IconButton;
-	title: FlatLabel;
-	titlePosition: point;
-	bg: color;
-	mediaCancel: IconButton;
-	mediaActionsSkip: pixels;
-	mediaForward: IconButton;
-	mediaDelete: IconButton;
-	search: IconButton;
-	searchRow: SearchFieldRow;
-	highlightBg: color;
-	highlightDuration: int;
-	radius: pixels;
-}
-
 LevelMeter {
 	height: pixels;
 	lineWidth: pixels;
@@ -1427,6 +1418,11 @@ defaultWindowTitle: WindowTitle {
 	bgActive: titleBgActive;
 	fg: titleFg;
 	fgActive: titleFgActive;
+	style: TextStyle(defaultTextStyle) {
+		font: font(semibold 12px);
+		linkFont: font(semibold 12px);
+		linkFontOver: font(semibold 12px underline);
+	}
 	minimize: IconButton(windowTitleButton) {
 		icon: icon {
 			{ windowTitleButtonSize, titleButtonBg },

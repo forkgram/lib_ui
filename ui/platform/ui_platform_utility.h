@@ -6,8 +6,6 @@
 //
 #pragma once
 
-#include "ui/platform/ui_platform_window_title.h"
-
 class QPoint;
 class QPainter;
 class QPaintEvent;
@@ -45,12 +43,13 @@ void SetWindowExtents(not_null<QWidget*> widget, const QMargins &extents);
 void UnsetWindowExtents(not_null<QWidget*> widget);
 void ShowWindowMenu(not_null<QWidget*> widget, const QPoint &point);
 
-[[nodiscard]] TitleControls::Layout TitleControlsLayout();
-[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutValue();
-[[nodiscard]] rpl::producer<TitleControls::Layout> TitleControlsLayoutChanged();
-void NotifyTitleControlsLayoutChanged();
-
 void FixPopupMenuNativeEmojiPopup(not_null<PopupMenu*> menu);
+
+// Workaround for a Qt/Wayland bug that hides the parent popup when
+// the child popup gets hidden, by sending Deactivate / Activate events.
+void RegisterChildPopupHiding();
+[[nodiscard]] bool SkipApplicationDeactivateEvent();
+void GotApplicationActivateEvent();
 
 } // namespace Ui::Platform
 

@@ -19,6 +19,7 @@ namespace Ui {
 
 class BoxContent;
 class RpWidget;
+class Show;
 
 class LayerManager final : public base::has_weak_ptr {
 public:
@@ -33,21 +34,35 @@ public:
 		object_ptr<BoxContent> box,
 		LayerOptions options = LayerOption::KeepOther,
 		anim::type animated = anim::type::normal);
+	void showLayer(
+		std::unique_ptr<LayerWidget> layer,
+		LayerOptions options = LayerOption::KeepOther,
+		anim::type animated = anim::type::normal);
 	void hideAll(anim::type animated = anim::type::normal);
 	void raise();
 	bool setFocus();
+
+	[[nodiscard]] rpl::producer<bool> layerShownValue() const {
+		return _layerShown.value();
+	}
 
 	[[nodiscard]] not_null<Ui::RpWidget*> toastParent() const {
 		return _widget;
 	}
 	[[nodiscard]] const LayerWidget *topShownLayer() const;
 
+	[[nodiscard]] std::shared_ptr<Show> uiShow();
+
 private:
+	class ManagerShow;
+
 	void ensureLayerCreated();
 	void destroyLayer();
 
 	const not_null<RpWidget*> _widget;
 	base::unique_qptr<LayerStackWidget> _layer;
+	std::shared_ptr<ManagerShow> _cachedShow;
+	rpl::variable<bool> _layerShown;
 
 	const style::Box *_boxSt = nullptr;
 	const style::Box *_layerSt = nullptr;
