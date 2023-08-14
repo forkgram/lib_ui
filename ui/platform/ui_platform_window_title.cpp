@@ -338,8 +338,10 @@ HitTestResult TitleControls::hitTest(QPoint point, int padding) const {
 		return HitTestResult::MaximizeRestore;
 	} else if (test(_close)) {
 		return HitTestResult::Close;
+#ifndef Q_OS_MAC
 	} else if (test(_top, false)) {
 		return HitTestResult::OnTop;
+#endif
 	}
 	return HitTestResult::None;
 }
