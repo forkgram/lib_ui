@@ -12,6 +12,7 @@
 
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
+#include <QtGui/QColorSpace>
 #include <private/qwidget_p.h>
 
 class TWidgetPrivate : public QWidgetPrivate {
@@ -47,6 +48,9 @@ TWidget::TWidget(QWidget *parent)
 	[[maybe_unused]] static const auto Once = [] {
 		auto format = QSurfaceFormat::defaultFormat();
 		format.setSwapInterval(0);
+#ifdef Q_OS_MAC
+		format.setColorSpace(QColorSpace::SRgb);
+#endif // Q_OS_MAC
 		QSurfaceFormat::setDefaultFormat(format);
 		return true;
 	}();

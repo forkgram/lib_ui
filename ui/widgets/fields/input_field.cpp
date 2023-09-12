@@ -1076,6 +1076,13 @@ CustomEmojiObject::CustomEmojiObject(Factory factory, Fn<bool()> paused)
 
 CustomEmojiObject::~CustomEmojiObject() = default;
 
+void *CustomEmojiObject::qt_metacast(const char *iid) {
+	if (QLatin1String(iid) == qobject_interface_iid<QTextObjectInterface*>()) {
+		return static_cast<QTextObjectInterface*>(this);
+	}
+	return QObject::qt_metacast(iid);
+}
+
 QSizeF CustomEmojiObject::intrinsicSize(
 		QTextDocument *doc,
 		int posInDocument,

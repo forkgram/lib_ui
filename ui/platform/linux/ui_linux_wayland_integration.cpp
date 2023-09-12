@@ -11,17 +11,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
 
-#include "qwayland-wayland.h"
-#include "qwayland-xdg-shell.h"
-
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 #include <qpa/qplatformnativeinterface.h>
 #include <qpa/qplatformwindow_p.h>
+#include <qwayland-wayland.h>
 
 using namespace QNativeInterface;
 using namespace QNativeInterface::Private;
 using namespace base::Platform::Wayland;
+struct xdg_toplevel;
 
 namespace Ui {
 namespace Platform {
@@ -88,9 +87,7 @@ bool WaylandIntegration::xdgDecorationSupported() {
 void WaylandIntegration::showWindowMenu(
 		not_null<QWidget*> widget,
 		const QPoint &point) {
-	const auto window = widget->windowHandle();
-	Expects(window != nullptr);
-
+	const auto window = not_null(widget->windowHandle());
 	const auto native = qApp->nativeInterface<QWaylandApplication>();
 	const auto nativeWindow = window->nativeInterface<QWaylandWindow>();
 	if (!native || !nativeWindow) {
@@ -103,8 +100,9 @@ void WaylandIntegration::showWindowMenu(
 		return;
 	}
 
-	xdg_toplevel_show_window_menu(
-		toplevel,
+	wl_proxy_marshal(
+		reinterpret_cast<wl_proxy*>(toplevel),
+		4, // XDG_TOPLEVEL_SHOW_WINDOW_MENU
 		seat,
 		native->lastInputSerial(),
 		point.x(),
