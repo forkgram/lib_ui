@@ -33,6 +33,7 @@ PRIVATE
     ui/colors.palette
     emoji_suggestions/emoji_autocomplete.json
 
+    fonts/fonts.qrc
     qt_conf/win.qrc
 
     ui/dpr/dpr_icon.cpp
@@ -107,9 +108,6 @@ PRIVATE
     ui/paint/blobs.h
     ui/paint/blobs_linear.cpp
     ui/paint/blobs_linear.h
-    ui/platform/linux/ui_linux_wayland_integration.cpp
-    ui/platform/linux/ui_linux_wayland_integration_dummy.cpp
-    ui/platform/linux/ui_linux_wayland_integration.h
     ui/platform/linux/ui_window_linux.cpp
     ui/platform/linux/ui_window_linux.h
     ui/platform/linux/ui_window_title_linux.cpp
@@ -301,28 +299,13 @@ PRIVATE
     emoji_suggestions/emoji_suggestions_helper.h
 )
 
-if (NOT DESKTOP_APP_USE_PACKAGED_FONTS)
-    nice_target_sources(lib_ui ${src_loc} PRIVATE fonts/fonts.qrc)
+if (DESKTOP_APP_USE_PACKAGED_FONTS)
+    target_compile_definitions(lib_ui PRIVATE LIB_UI_USE_PACKAGED_FONTS)
+    remove_target_sources(lib_ui ${src_loc} fonts/fonts.qrc)
 endif()
 
 if (WIN32)
     nuget_add_winrt(lib_ui)
-endif()
-
-if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
-    remove_target_sources(lib_ui ${src_loc} ui/platform/linux/ui_linux_wayland_integration.cpp)
-elseif(LINUX)
-    remove_target_sources(lib_ui ${src_loc} ui/platform/linux/ui_linux_wayland_integration_dummy.cpp)
-
-    qt_generate_wayland_protocol_client_sources(lib_ui
-    FILES
-        ${third_party_loc}/wayland/protocol/wayland.xml
-    )
-
-    target_link_libraries(lib_ui
-    PUBLIC
-        desktop-app::external_wayland_client
-    )
 endif()
 
 target_include_directories(lib_ui

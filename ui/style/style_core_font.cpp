@@ -29,9 +29,9 @@ void style_InitFontsResource() {
 
 #else // Q_OS_MAC
 
-#ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 	Q_INIT_RESOURCE(fonts);
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
+#endif // !LIB_UI_USE_PACKAGED_FONTS
 #ifdef Q_OS_WIN
 	Q_INIT_RESOURCE(win);
 #endif // Q_OS_WIN
@@ -71,6 +71,7 @@ bool ValidateFont(const QString &familyName, int flags = 0) {
 	return true;
 }
 
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 bool LoadCustomFont(const QString &filePath, const QString &familyName, int flags = 0) {
 	auto regularId = QFontDatabase::addApplicationFont(filePath);
 	if (regularId < 0) {
@@ -94,6 +95,7 @@ bool LoadCustomFont(const QString &filePath, const QString &familyName, int flag
 
 	return ValidateFont(familyName, flags);
 }
+#endif // !LIB_UI_USE_PACKAGED_FONTS
 
 [[nodiscard]] QString SystemMonospaceFont() {
 	const auto type = QFontDatabase::FixedFont;
@@ -127,7 +129,7 @@ enum {
 
 	FontTypesCount,
 };
-#ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 QString FontTypeFiles[FontTypesCount] = {
 	"DAOpenSansRegular",
 	"DAOpenSansRegularItalic",
@@ -160,7 +162,6 @@ QString FontTypePersianFallback[FontTypesCount] = {
 	"DAVazirMedium",
 	"DAVazirMedium",
 };
-#endif // !DESKTOP_APP_USE_PACKAGED_FONTS
 int32 FontTypeFlags[FontTypesCount] = {
 	0,
 	FontItalic,
@@ -169,6 +170,7 @@ int32 FontTypeFlags[FontTypesCount] = {
 	FontSemibold,
 	FontSemibold | FontItalic,
 };
+#endif // !LIB_UI_USE_PACKAGED_FONTS
 
 bool Started = false;
 QString Overrides[FontTypesCount];
@@ -183,7 +185,7 @@ void StartFonts() {
 
 	style_InitFontsResource();
 
-#ifndef DESKTOP_APP_USE_PACKAGED_FONTS
+#ifndef LIB_UI_USE_PACKAGED_FONTS
 	[[maybe_unused]] bool areGood[FontTypesCount] = { false };
 	for (auto i = 0; i != FontTypesCount; ++i) {
 		const auto file = FontTypeFiles[i];
@@ -227,11 +229,11 @@ void StartFonts() {
 		QFont::insertSubstitutions(name, list);
 	}
 #endif // Q_OS_MAC
-#elif __has_include(<glib.h>) // !DESKTOP_APP_USE_PACKAGED_FONTS
+#elif __has_include(<glib.h>) // !LIB_UI_USE_PACKAGED_FONTS
 	g_warning(
 		"Unable to load patched fonts with Qt workarounds, "
 		"expect font issues.");
-#endif // DESKTOP_APP_USE_PACKAGED_FONTS
+#endif // LIB_UI_USE_PACKAGED_FONTS
 
 	auto appFont = QApplication::font();
 	appFont.setStyleStrategy(QFont::PreferQuality);
