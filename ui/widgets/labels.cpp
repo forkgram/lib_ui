@@ -199,7 +199,7 @@ FlatLabel::FlatLabel(
 	const style::FlatLabel &st,
 	const style::PopupMenu &stMenu)
 : RpWidget(parent)
-, _text(st.minWidth ? st.minWidth : QFIXED_MAX)
+, _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
 , _stMenu(stMenu) {
 	init();
@@ -211,7 +211,7 @@ FlatLabel::FlatLabel(
 	const style::FlatLabel &st,
 	const style::PopupMenu &stMenu)
 : RpWidget(parent)
-, _text(st.minWidth ? st.minWidth : QFIXED_MAX)
+, _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
 , _stMenu(stMenu) {
 	setText(text);
@@ -224,7 +224,7 @@ FlatLabel::FlatLabel(
 	const style::FlatLabel &st,
 	const style::PopupMenu &stMenu)
 : RpWidget(parent)
-, _text(st.minWidth ? st.minWidth : QFIXED_MAX)
+, _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
 , _stMenu(stMenu) {
 	textUpdated();
@@ -242,7 +242,7 @@ FlatLabel::FlatLabel(
 	const style::FlatLabel &st,
 	const style::PopupMenu &stMenu)
 : RpWidget(parent)
-, _text(st.minWidth ? st.minWidth : QFIXED_MAX)
+, _text(st.minWidth ? st.minWidth : kQFixedMax)
 , _st(st)
 , _stMenu(stMenu)
 , _touchSelectTimer([=] { touchSelect(); }) {
@@ -368,8 +368,8 @@ void FlatLabel::refreshSize() {
 	resize(fullWidth, fullHeight);
 }
 
-void FlatLabel::setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk) {
-	_text.setLink(lnkIndex, lnk);
+void FlatLabel::setLink(uint16 index, const ClickHandlerPtr &lnk) {
+	_text.setLink(index, lnk);
 }
 
 void FlatLabel::setLinksTrusted() {
@@ -795,7 +795,9 @@ CrossFadeAnimation::Data FlatLabel::crossFadeData(
 	auto result = CrossFadeAnimation::Data();
 	result.full = GrabWidgetToImage(this, QRect(), bg->c);
 	const auto textWidth = width() - _st.margin.left() - _st.margin.right();
-	_text.countLineWidths(textWidth, &result.lineWidths, _breakEverywhere);
+	result.lineWidths = _text.countLineWidths(textWidth, {
+		.breakEverywhere = _breakEverywhere,
+	});
 	result.lineHeight = _st.style.font->height;
 	const auto addedHeight = (_st.style.lineHeight - result.lineHeight);
 	if (addedHeight > 0) {
@@ -961,11 +963,11 @@ void FlatLabel::paintEvent(QPaintEvent *e) {
 		&& (_st.maxHeight < _fullTextHeight || textWidth < _text.maxWidth());
 	const auto renderElided = _breakEverywhere || heightExceeded;
 	const auto lineHeight = qMax(_st.style.lineHeight, _st.style.font->height);
-	const auto lines = !renderElided
+	const auto elisionHeight = !renderElided
 		? 0
 		: _st.maxHeight
-		? qMax(_st.maxHeight / lineHeight, 1)
-		: ((height() / lineHeight) + 2);
+		? qMax(_st.maxHeight, lineHeight)
+		: height();
 	const auto paused = _animationsPausedCallback
 		? _animationsPausedCallback()
 		: WhichAnimationsPaused::None;
@@ -982,7 +984,7 @@ void FlatLabel::paintEvent(QPaintEvent *e) {
 		.pausedSpoiler = (paused == WhichAnimationsPaused::Spoiler
 			|| paused == WhichAnimationsPaused::All),
 		.selection = selection,
-		.elisionLines = lines,
+		.elisionHeight = elisionHeight,
 		.elisionBreakEverywhere = renderElided && _breakEverywhere,
 	});
 }

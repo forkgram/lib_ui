@@ -12,6 +12,7 @@
 
 namespace Ui::Text {
 
+struct Modification;
 class String;
 
 class SpoilerClickHandler final : public ClickHandler {
@@ -31,6 +32,22 @@ private:
 
 };
 
+class PreClickHandler final : public ClickHandler {
+public:
+	PreClickHandler(not_null<String*> text, uint16 offset, uint16 length);
+
+	[[nodiscard]] not_null<String*> text() const;
+	void setText(not_null<String*> text);
+
+	void onClick(ClickContext context) const override;
+
+private:
+	not_null<String*> _text;
+	uint16 _offset = 0;
+	uint16 _length = 0;
+
+};
+
 struct SpoilerData {
 	explicit SpoilerData(Fn<void()> repaint)
 	: animation(std::move(repaint)) {
@@ -40,6 +57,24 @@ struct SpoilerData {
 	std::shared_ptr<SpoilerClickHandler> link;
 	Animations::Simple revealAnimation;
 	bool revealed = false;
+};
+
+struct QuoteDetails {
+	QString language;
+	std::shared_ptr<PreClickHandler> copy;
+	int copyWidth = 0;
+	int maxWidth = 0;
+	int minHeight = 0;
+	int scrollLeft = 0;
+	bool blockquote = false;
+	bool pre = false;
+};
+
+struct ExtendedData {
+	std::vector<ClickHandlerPtr> links;
+	std::vector<QuoteDetails> quotes;
+	std::unique_ptr<SpoilerData> spoiler;
+	std::vector<Modification> modifications;
 };
 
 } // namespace Ui::Text

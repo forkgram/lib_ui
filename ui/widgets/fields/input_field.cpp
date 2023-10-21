@@ -52,6 +52,7 @@ const auto &kTagUnderline = InputField::kTagUnderline;
 const auto &kTagStrikeOut = InputField::kTagStrikeOut;
 const auto &kTagCode = InputField::kTagCode;
 const auto &kTagPre = InputField::kTagPre;
+const auto &kTagBlockquote = InputField::kTagBlockquote;
 const auto &kTagSpoiler = InputField::kTagSpoiler;
 const auto &kCustomEmojiFormat = InputField::kCustomEmojiFormat;
 const auto kTagCheckLinkMeta = u"^:/:/:^"_q;
@@ -64,6 +65,10 @@ const auto kNewlineChars = QString("\r\n")
 // We need unique tags otherwise same custom emoji would join in a single
 // QTextCharFormat with the same properties, including kCustomEmojiText.
 auto GlobalCustomEmojiCounter = 0;
+
+[[nodiscard]] bool IsTagPre(QStringView tag) {
+	return tag.startsWith(kTagPre);
+}
 
 class InputDocument : public QTextDocument {
 public:
@@ -169,7 +174,7 @@ bool IsNewline(QChar ch) {
 		}
 		auto found = false;
 		for (const auto &single : TextUtilities::SplitTags(existing.id)) {
-			const auto normalized = (single == QStringView(kTagPre))
+			const auto normalized = IsTagPre(single)
 				? QStringView(kTagCode)
 				: single;
 			if (checkingLink && IsValidMarkdownLink(single)) {
@@ -205,6 +210,17 @@ bool IsNewline(QChar ch) {
 		const TextWithTags &textWithTags,
 		const QString &tag) {
 	return !CheckFullTextTag(textWithTags, tag).isEmpty();
+}
+
+[[nodiscard]] QString ReadPreLanguageName(
+		const QString &text,
+		int preStart,
+		int preLength) {
+	auto view = QStringView(text).mid(preStart, preLength);
+	static const auto expression = QRegularExpression(
+		"^([a-zA-Z0-9\\-]+)[\\r\\n]");
+	const auto m = expression.match(view);
+	return m.hasMatch() ? m.captured(1).toLower() : QString();
 }
 
 class TagAccumulator {
@@ -739,7 +755,10 @@ QTextCharFormat PrepareTagFormat(
 			font = font->underline();
 		} else if (tag == kTagStrikeOut) {
 			font = font->strikeout();
-		} else if (tag == kTagCode || tag == kTagPre) {
+		} else if (tag == kTagBlockquote) {
+			color = st::defaultTextPalette.monoFg;
+			font = font->italic();
+		} else if (tag == kTagCode || IsTagPre(tag)) {
 			color = st::defaultTextPalette.monoFg;
 			font = font->monospace();
 		} else if (tag == kTagSpoiler) {
@@ -916,13 +935,14 @@ struct FormattingAction {
 
 // kTagUnderline is not used for Markdown.
 
-const QString InputField::kTagBold = QStringLiteral("**");
-const QString InputField::kTagItalic = QStringLiteral("__");
-const QString InputField::kTagUnderline = QStringLiteral("^^");
-const QString InputField::kTagStrikeOut = QStringLiteral("~~");
-const QString InputField::kTagCode = QStringLiteral("`");
-const QString InputField::kTagPre = QStringLiteral("```");
-const QString InputField::kTagSpoiler = QStringLiteral("||");
+const QString InputField::kTagBold = u"**"_q;
+const QString InputField::kTagItalic = u"__"_q;
+const QString InputField::kTagUnderline = u"^^"_q;
+const QString InputField::kTagStrikeOut = u"~~"_q;
+const QString InputField::kTagCode = u"`"_q;
+const QString InputField::kTagPre = u"```"_q;
+const QString InputField::kTagSpoiler = u"||"_q;
+const QString InputField::kTagBlockquote = u">"_q;
 const QString InputField::kCustomEmojiTagStart = u"custom-emoji://"_q;
 const int InputField::kCustomEmojiFormat
 	= QTextFormat::UserObject + 1;
@@ -2669,11 +2689,21 @@ TextWithTags InputField::getTextWithAppliedMarkdown() const {
 		}
 		addOriginalTextUpTill(tag.adjustedStart);
 
+		auto tagId = tag.tag;
 		auto entityStart = tag.adjustedStart + tagLength;
-		if (tag.tag == kTagPre) {
+		if (tagId == kTagPre) {
 			// Remove redundant newlines for pre.
 			// If ``` is on a separate line add only one newline.
-			if (IsNewline(originalText[entityStart])
+			const auto languageName = ReadPreLanguageName(
+				originalText,
+				entityStart,
+				entityLength);
+			if (!languageName.isEmpty()) {
+				// ```language-name{\n}code
+				entityStart += languageName.size() + 1;
+				entityLength -= languageName.size() + 1;
+				tagId += languageName;
+			} else if (IsNewline(originalText[entityStart])
 				&& (result.text.isEmpty()
 					|| IsNewline(result.text[result.text.size() - 1]))) {
 				++entityStart;
@@ -2692,7 +2722,7 @@ TextWithTags InputField::getTextWithAppliedMarkdown() const {
 			result.tags.push_back(TextWithTags::Tag{
 				int(result.text.size()),
 				entityLength,
-				tag.tag });
+				tagId });
 			result.text.append(base::StringViewMid(
 				originalText,
 				entityStart,
@@ -2879,6 +2909,14 @@ bool InputField::handleMarkdownKey(QKeyEvent *e) {
 		const auto events = QKeySequence(searchKey);
 		return sequence.matches(events) == QKeySequence::ExactMatch;
 	};
+	const auto matchesCtrlShiftDot = [&] {
+		// We can't match ctrl+shift+. with QKeySequence because
+		// shift+. gives us '>' and ctrl+shift+> is not the same.
+		// So we check by nativeVirtualKey instead.
+		return e->modifiers().testFlag(Qt::ControlModifier)
+			&& e->modifiers().testFlag(Qt::ShiftModifier)
+			&& (e->nativeVirtualKey() == 190);
+	};
 	if (e == QKeySequence::Bold) {
 		toggleSelectionMarkdown(kTagBold);
 	} else if (e == QKeySequence::Italic) {
@@ -2889,6 +2927,8 @@ bool InputField::handleMarkdownKey(QKeyEvent *e) {
 		toggleSelectionMarkdown(kTagStrikeOut);
 	} else if (matches(kMonospaceSequence)) {
 		toggleSelectionMarkdown(kTagCode);
+	} else if (matches(kBlockquoteSequence) || matchesCtrlShiftDot()) {
+		toggleSelectionMarkdown(kTagBlockquote);
 	}  else if (matches(kSpoilerSequence)) {
 		toggleSelectionMarkdown(kTagSpoiler);
 	} else if (matches(kClearFormatSequence)) {
@@ -3122,7 +3162,7 @@ void InputField::processInstantReplaces(const QString &appended) {
 	for (const auto &tag : _lastMarkdownTags) {
 		if (tag.internalStart < position
 			&& tag.internalStart + tag.internalLength >= position
-			&& (tag.tag == kTagCode || tag.tag == kTagPre)) {
+			&& (tag.tag == kTagCode || IsTagPre(tag.tag))) {
 			return;
 		}
 	}
@@ -3198,10 +3238,10 @@ void InputField::commitInstantReplacement(
 		const auto currentTag = cursor.charFormat().property(
 			kTagProperty
 		).toString();
-		const auto currentTags = TextUtilities::SplitTags(currentTag);
-		if (currentTags.contains(QStringView(kTagPre))
-			|| currentTags.contains(QStringView(kTagCode))) {
-			return;
+		for (const auto &tag : TextUtilities::SplitTags(currentTag)) {
+			if (tag == kTagCode || IsTagPre(tag)) {
+				return;
+			}
 		}
 	}
 	cursor.setPosition(from);
@@ -3494,9 +3534,9 @@ void InputField::commitMarkdownLinkEdit(
 void InputField::toggleSelectionMarkdown(const QString &tag) {
 	_reverseMarkdownReplacement = false;
 	const auto cursor = textCursor();
-	const auto position = cursor.position();
-	const auto from = cursor.selectionStart();
-	const auto till = cursor.selectionEnd();
+	auto position = cursor.position();
+	auto from = cursor.selectionStart();
+	auto till = cursor.selectionEnd();
 	if (from == till) {
 		return;
 	}
@@ -3505,33 +3545,50 @@ void InputField::toggleSelectionMarkdown(const QString &tag) {
 	} else if (HasFullTextTag(getTextWithTagsSelected(), tag)) {
 		removeMarkdownTag(from, till, tag);
 	} else {
-		const auto useTag = [&] {
-			if (tag != kTagCode) {
-				return tag;
+		const auto leftForBlock = [&] {
+			if (!from) {
+				return true;
 			}
-			const auto leftForBlock = [&] {
-				if (!from) {
-					return true;
-				}
-				const auto text = getTextWithTagsPart(
-					from - 1,
-					from + 1
-				).text;
-				return text.isEmpty()
-					|| IsNewline(text[0])
-					|| IsNewline(text[text.size() - 1]);
-			}();
-			const auto rightForBlock = [&] {
-				const auto text = getTextWithTagsPart(
-					till - 1,
-					till + 1
-				).text;
-				return text.isEmpty()
-					|| IsNewline(text[0])
-					|| IsNewline(text[text.size() - 1]);
-			}();
-			return (leftForBlock && rightForBlock) ? kTagPre : kTagCode;
+			const auto text = getTextWithTagsPart(
+				from - 1,
+				from + 1
+			).text;
+			return text.isEmpty()
+				|| IsNewline(text[0])
+				|| IsNewline(text[text.size() - 1]);
 		}();
+		const auto rightForBlock = [&] {
+			const auto text = getTextWithTagsPart(
+				till - 1,
+				till + 1
+			).text;
+			return text.isEmpty()
+				|| IsNewline(text[0])
+				|| IsNewline(text[text.size() - 1]);
+		}();
+
+		const auto useTag = (tag != kTagCode)
+			? tag
+			: (leftForBlock && rightForBlock)
+			? kTagPre
+			: kTagCode;
+		if (tag == kTagBlockquote) {
+			QTextCursor(document()).beginEditBlock();
+			if (!leftForBlock) {
+				auto copy = textCursor();
+				copy.setPosition(from);
+				copy.insertText(u"\n"_q);
+				++position;
+				++from;
+				++till;
+			}
+			if (!rightForBlock) {
+				auto copy = textCursor();
+				copy.setPosition(till);
+				copy.insertText(u"\n"_q);
+			}
+			QTextCursor(document()).endEditBlock();
+		}
 		addMarkdownTag(from, till, useTag);
 	}
 	auto restorePosition = textCursor();
@@ -3714,6 +3771,7 @@ void InputField::addMarkdownActions(
 	addtag(integration.phraseFormattingItalic(), QKeySequence::Italic, kTagItalic);
 	addtag(integration.phraseFormattingUnderline(), QKeySequence::Underline, kTagUnderline);
 	addtag(integration.phraseFormattingStrikeOut(), kStrikeOutSequence, kTagStrikeOut);
+	addtag(integration.phraseFormattingBlockquote(), kBlockquoteSequence, kTagBlockquote);
 	addtag(integration.phraseFormattingMonospace(), kMonospaceSequence, kTagCode);
 	addtag(integration.phraseFormattingSpoiler(), kSpoilerSequence, kTagSpoiler);
 

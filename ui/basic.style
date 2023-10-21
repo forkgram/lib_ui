@@ -16,15 +16,32 @@ TextPalette {
 	selectMonoFg: color;
 	selectSpoilerFg: color;
 	selectOverlay: color;
-	linkAlwaysActive: int;
+	linkAlwaysActive: bool;
+}
+
+QuoteStyle {
+	padding: margins;
+	verticalSkip: pixels;
+	header: pixels;
+	headerPosition: point;
+	icon: icon;
+	iconPosition: point;
+	outline: pixels;
+	radius: pixels;
+	scrollable: bool;
 }
 
 TextStyle {
 	font: font;
-	linkFont: font;
-	linkFontOver: font;
+	linkUnderline: int;
 	lineHeight: pixels;
+	blockquote: QuoteStyle;
+	pre: QuoteStyle;
 }
+
+kLinkUnderlineNever: 0;
+kLinkUnderlineActive: 1;
+kLinkUnderlineAlways: 2;
 
 fsize: 13px;
 normalFont: font(fsize);
@@ -48,16 +65,17 @@ defaultTextPalette: TextPalette {
 	selectSpoilerFg: msgInDateFgSelected;
 	selectOverlay: msgSelectOverlay;
 }
+defaultQuoteStyle: QuoteStyle {
+}
 defaultTextStyle: TextStyle {
 	font: normalFont;
-	linkFont: normalFont;
-	linkFontOver: font(fsize underline);
+	linkUnderline: kLinkUnderlineActive;
 	lineHeight: 0px;
+	blockquote: defaultQuoteStyle;
+	pre: defaultQuoteStyle;
 }
 semiboldTextStyle: TextStyle(defaultTextStyle) {
 	font: semiboldFont;
-	linkFont: semiboldFont;
-	linkFontOver: font(fsize semibold underline);
 }
 
 slideDuration: 240;
@@ -69,7 +87,7 @@ fadeWrapDuration: 200;
 
 linkCropLimit: 360px;
 linkFont: normalFont;
-linkOverFont: font(fsize underline);
+linkFontOver: font(fsize underline);
 
 roundRadiusLarge: 6px;
 roundRadiusSmall: 3px;

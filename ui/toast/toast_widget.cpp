@@ -45,7 +45,7 @@ Widget::Widget(QWidget *parent, const Config &config)
 , _maxTextWidth(widthWithoutPadding(_st->maxWidth))
 , _maxTextHeight(
 	config.st->style.font->height * (_multiline ? config.maxLines : 1))
-, _text(_multiline ? widthWithoutPadding(config.st->minWidth) : QFIXED_MAX)
+, _text(_multiline ? widthWithoutPadding(config.st->minWidth) : kQFixedMax)
 , _clickHandlerFilter(config.filter) {
 	const auto toastOptions = TextParseOptions{
 		TextParseMultiline,
@@ -173,14 +173,13 @@ void Widget::paintEvent(QPaintEvent *e) {
 			width());
 	}
 
-	const auto lines = _maxTextHeight / _st->style.font->height;
 	p.setPen(st::toastFg);
 	_text.draw(p, {
 		.position = { _st->padding.left(), _textTop },
 		.availableWidth = _textWidth + 1,
 		.palette = &_st->palette,
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
-		.elisionLines = lines,
+		.elisionHeight = _maxTextHeight,
 	});
 }
 

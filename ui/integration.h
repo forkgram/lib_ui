@@ -57,6 +57,7 @@ public:
 	[[nodiscard]] virtual bool handleUrlClick(
 		const QString &url,
 		const QVariant &context);
+	[[nodiscard]] virtual bool copyPreOnClick(const QVariant &context);
 	[[nodiscard]] virtual QString convertTagToMimeTag(const QString &tagId);
 	[[nodiscard]] virtual const Emoji::One *defaultEmojiVariant(
 		const Emoji::One *emoji);
@@ -83,6 +84,7 @@ public:
 	[[nodiscard]] virtual QString phraseFormattingItalic();
 	[[nodiscard]] virtual QString phraseFormattingUnderline();
 	[[nodiscard]] virtual QString phraseFormattingStrikeOut();
+	[[nodiscard]] virtual QString phraseFormattingBlockquote();
 	[[nodiscard]] virtual QString phraseFormattingMonospace();
 	[[nodiscard]] virtual QString phraseFormattingSpoiler();
 	[[nodiscard]] virtual QString phraseButtonOk();

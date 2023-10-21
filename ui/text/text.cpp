@@ -6,14 +6,21 @@
 //
 #include "ui/text/text.h"
 
+#include "ui/effects/spoiler_mess.h"
+#include "ui/text/text_extended_data.h"
 #include "ui/text/text_isolated_emoji.h"
 #include "ui/text/text_parser.h"
 #include "ui/text/text_renderer.h"
-#include "ui/text/text_spoiler_data.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/painter.h"
 #include "base/platform/base_platform_info.h"
 #include "styles/style_basic.h"
+
+namespace Ui {
+
+const QString kQEllipsis = u"..."_q;
+
+} // namespace Ui
 
 namespace Ui::Text {
 namespace {
@@ -85,11 +92,18 @@ const TextParseOptions kPlainTextOptions = {
 
 namespace Ui::Text {
 
+struct SpoilerMessCache::Entry {
+	SpoilerMessCached mess;
+	QColor color;
+};
+
 SpoilerMessCache::SpoilerMessCache(int capacity) : _capacity(capacity) {
 	Expects(capacity > 0);
 
 	_cache.reserve(capacity);
 }
+
+SpoilerMessCache::~SpoilerMessCache() = default;
 
 not_null<SpoilerMessCached*> SpoilerMessCache::lookup(QColor color) {
 	for (auto &entry : _cache) {
@@ -125,27 +139,248 @@ not_null<SpoilerMessCache*> DefaultSpoilerCache() {
 	return &data.cache;
 }
 
-String::SpoilerDataWrap::SpoilerDataWrap() noexcept = default;
+GeometryDescriptor SimpleGeometry(
+		int availableWidth,
+		int fontHeight,
+		int elisionHeight,
+		int elisionRemoveFromEnd,
+		bool elisionOneLine,
+		bool elisionBreakEverywhere) {
+	constexpr auto wrap = [](
+			Fn<LineGeometry(LineGeometry)> layout,
+			bool breakEverywhere = false) {
+		return GeometryDescriptor{ std::move(layout), breakEverywhere };
+	};
 
-String::SpoilerDataWrap::SpoilerDataWrap(SpoilerDataWrap &&other) noexcept
-: data(std::move(other.data)) {
+	// Try to minimize captured values (to minimize Fn allocations).
+	if (!elisionOneLine && !elisionHeight) {
+		return wrap([=](LineGeometry line) {
+			line.width = availableWidth;
+			return line;
+		});
+	} else if (elisionOneLine) {
+		return wrap([=](LineGeometry line) {
+			line.elided = true;
+			line.width = availableWidth - elisionRemoveFromEnd;
+			return line;
+		}, elisionBreakEverywhere);
+	} else if (!elisionRemoveFromEnd) {
+		return wrap([=](LineGeometry line) {
+			if (line.top + fontHeight * 2 > elisionHeight) {
+				line.elided = true;
+			}
+			line.width = availableWidth;
+			return line;
+		});
+	} else {
+		return wrap([=](LineGeometry line) {
+			if (line.top + fontHeight * 2 > elisionHeight) {
+				line.elided = true;
+				line.width = availableWidth - elisionRemoveFromEnd;
+			} else {
+				line.width = availableWidth;
+			}
+			return line;
+		});
+	}
+};
+
+void ValidateQuotePaintCache(
+		QuotePaintCache &cache,
+		const style::QuoteStyle &st) {
+	const auto icon = st.icon.empty() ? nullptr : &st.icon;
+	if (!cache.corners.isNull()
+		&& cache.bgCached == cache.bg
+		&& cache.outlineCached == cache.outline
+		&& (!st.header || cache.headerCached == cache.header)
+		&& (!icon || cache.iconCached == cache.icon)) {
+		return;
+	}
+	cache.bgCached = cache.bg;
+	cache.outlineCached = cache.outline;
+	if (st.header) {
+		cache.headerCached = cache.header;
+	}
+	if (!st.icon.empty()) {
+		cache.iconCached = cache.icon;
+	}
+	const auto radius = st.radius;
+	const auto header = st.header;
+	const auto outline = st.outline;
+	const auto iconsize = icon
+		? std::max(
+			icon->width() + st.iconPosition.x(),
+			icon->height() + st.iconPosition.y())
+		: 0;
+	const auto corner = std::max({ header, radius, outline, iconsize });
+	const auto middle = st::lineWidth;
+	const auto side = 2 * corner + middle;
+	const auto full = QSize(side, side);
+	const auto ratio = style::DevicePixelRatio();
+	auto image = QImage(full * ratio, QImage::Format_ARGB32_Premultiplied);
+	image.fill(Qt::transparent);
+	image.setDevicePixelRatio(ratio);
+	auto p = QPainter(&image);
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(Qt::NoPen);
+
+	if (header) {
+		p.setBrush(cache.header);
+		p.setClipRect(outline, 0, side - outline, header);
+		p.drawRoundedRect(0, 0, side, corner + radius, radius, radius);
+	}
+	if (outline) {
+		p.setBrush(cache.outline);
+		p.setClipRect(0, 0, outline, side);
+		p.drawRoundedRect(0, 0, outline + radius * 2, side, radius, radius);
+	}
+	p.setBrush(cache.bg);
+	p.setClipRect(outline, header, side - outline, side - header);
+	p.drawRoundedRect(0, 0, side, side, radius, radius);
+	if (icon) {
+		p.setClipping(false);
+		const auto left = side - icon->width() - st.iconPosition.x();
+		const auto top = st.iconPosition.y();
+		icon->paint(p, left, top, side, cache.icon);
+	}
+
+	p.end();
+	cache.corners = std::move(image);
+}
+
+void FillQuotePaint(
+		QPainter &p,
+		QRect rect,
+		const QuotePaintCache &cache,
+		const style::QuoteStyle &st,
+		SkipBlockPaintParts parts) {
+	const auto &image = cache.corners;
+	const auto ratio = int(image.devicePixelRatio());
+	const auto iwidth = image.width() / ratio;
+	const auto iheight = image.height() / ratio;
+	const auto imiddle = st::lineWidth;
+	const auto ihalf = (iheight - imiddle) / 2;
+	const auto x = rect.left();
+	const auto width = rect.width();
+	auto y = rect.top();
+	auto height = rect.height();
+	if (!parts.skipTop) {
+		const auto top = std::min(height, ihalf);
+		p.drawImage(
+			QRect(x, y, ihalf, top),
+			image,
+			QRect(0, 0, ihalf * ratio, top * ratio));
+		p.drawImage(
+			QRect(x + width - ihalf, y, ihalf, top),
+			image,
+			QRect((iwidth - ihalf) * ratio, 0, ihalf * ratio, top * ratio));
+		if (const auto middle = width - 2 * ihalf) {
+			const auto header = st.header;
+			const auto fillHeader = std::min(header, top);
+			if (fillHeader) {
+				p.fillRect(x + ihalf, y, middle, fillHeader, cache.header);
+			}
+			if (const auto fillBody = top - fillHeader) {
+				p.fillRect(
+					QRect(x + ihalf, y + fillHeader, middle, fillBody),
+					cache.bg);
+			}
+		}
+		height -= top;
+		if (!height) {
+			return;
+		}
+		y += top;
+		rect.setTop(y);
+	}
+	if (!parts.skipBottom) {
+		const auto bottom = std::min(height, ihalf);
+		p.drawImage(
+			QRect(x, y + height - bottom, ihalf, bottom),
+			image,
+			QRect(
+				0,
+				(iheight - bottom) * ratio,
+				ihalf * ratio,
+				bottom * ratio));
+		p.drawImage(
+			QRect(
+				x + width - ihalf,
+				y + height - bottom,
+				ihalf,
+				bottom),
+			image,
+			QRect(
+				(iwidth - ihalf) * ratio,
+				(iheight - bottom) * ratio,
+				ihalf * ratio,
+				bottom * ratio));
+		if (const auto middle = width - 2 * ihalf) {
+			p.fillRect(
+				QRect(x + ihalf, y + height - bottom, middle, bottom),
+				cache.bg);
+		}
+		height -= bottom;
+		if (!height) {
+			return;
+		}
+		rect.setHeight(height);
+	}
+	const auto outline = st.outline;
+	if (outline) {
+		p.fillRect(x, y, outline, height, cache.outline);
+	}
+	p.fillRect(x + outline, y, width - outline, height, cache.bg);
+}
+
+String::ExtendedWrap::ExtendedWrap() noexcept = default;
+
+String::ExtendedWrap::ExtendedWrap(ExtendedWrap &&other) noexcept
+: unique_ptr(std::move(other)) {
 	adjustFrom(&other);
 }
 
-String::SpoilerDataWrap &String::SpoilerDataWrap::operator=(
-		SpoilerDataWrap &&other) noexcept {
-	data = std::move(other.data);
+String::ExtendedWrap &String::ExtendedWrap::operator=(
+		ExtendedWrap &&other) noexcept {
+	*static_cast<unique_ptr*>(this) = std::move(other);
 	adjustFrom(&other);
 	return *this;
 }
 
-void String::SpoilerDataWrap::adjustFrom(const SpoilerDataWrap *other) {
-	if (data && data->link) {
-		const auto raw = [](auto pointer) {
-			return reinterpret_cast<quintptr>(pointer);
-		};
-		data->link->setText(reinterpret_cast<String*>(
-			raw(data->link->text().get()) + raw(this) - raw(other)));
+String::ExtendedWrap::ExtendedWrap(
+	std::unique_ptr<ExtendedData> &&other) noexcept
+: unique_ptr(std::move(other)) {
+	Assert(!get() || !get()->spoiler);
+}
+
+String::ExtendedWrap &String::ExtendedWrap::operator=(
+		std::unique_ptr<ExtendedData> &&other) noexcept {
+	*static_cast<unique_ptr*>(this) = std::move(other);
+	Assert(!get() || !get()->spoiler);
+	return *this;
+}
+
+String::ExtendedWrap::~ExtendedWrap() = default;
+
+void String::ExtendedWrap::adjustFrom(const ExtendedWrap *other) {
+	const auto data = get();
+	const auto raw = [](auto pointer) {
+		return reinterpret_cast<quintptr>(pointer);
+	};
+	const auto adjust = [&](auto &link) {
+		const auto otherText = raw(link->text().get());
+		link->setText(
+			reinterpret_cast<String*>(otherText + raw(this) - raw(other)));
+	};
+	if (data) {
+		if (data->spoiler) {
+			adjust(data->spoiler->link);
+		}
+		for (auto &quote : data->quotes) {
+			if (quote.copy) {
+				adjust(quote.copy);
+			}
+		}
 	}
 }
 
@@ -188,40 +423,78 @@ void String::setText(const style::TextStyle &st, const QString &text, const Text
 	recountNaturalSize(true, options.dir);
 }
 
-void String::recountNaturalSize(bool initial, Qt::LayoutDirection optionsDir) {
-	NewlineBlock *lastNewline = 0;
+void String::recountNaturalSize(
+		bool initial,
+		Qt::LayoutDirection optionsDirection) {
+	auto lastNewline = (NewlineBlock*)nullptr;
+	auto lastNewlineStart = 0;
+	const auto computeParagraphDirection = [&](int paragraphEnd) {
+		const auto direction = (optionsDirection != Qt::LayoutDirectionAuto)
+			? optionsDirection
+			: StringDirection(_text, lastNewlineStart, paragraphEnd);
+		if (lastNewline) {
+			lastNewline->_paragraphLTR = (direction == Qt::LeftToRight);
+			lastNewline->_paragraphRTL = (direction == Qt::RightToLeft);
+		} else {
+			_startParagraphLTR = (direction == Qt::LeftToRight);
+			_startParagraphRTL = (direction == Qt::RightToLeft);
+		}
+	};
 
-	_maxWidth = _minHeight = 0;
-	int32 lineHeight = 0;
-	int32 lastNewlineStart = 0;
-	QFixed _width = 0, last_rBearing = 0, last_rPadding = 0;
+	auto qindex = quoteIndex(nullptr);
+	auto quote = quoteByIndex(qindex);
+	auto qpadding = quotePadding(quote);
+	auto qminwidth = quoteMinWidth(quote);
+	auto qmaxwidth = QFixed(qminwidth);
+	auto qoldheight = 0;
+
+	_maxWidth = 0;
+	_minHeight = qpadding.top();
+	auto lineHeight = 0;
+	auto maxWidth = QFixed();
+	auto width = QFixed(qminwidth);
+	auto last_rBearing = QFixed();
+	auto last_rPadding = QFixed();
 	for (auto &block : _blocks) {
-		auto b = block.get();
-		auto _btype = b->type();
-		auto blockHeight = CountBlockHeight(b, _st);
-		if (_btype == TextBlockTNewline) {
-			if (!lineHeight) lineHeight = blockHeight;
-			if (initial) {
-				Qt::LayoutDirection dir = optionsDir;
-				if (dir == Qt::LayoutDirectionAuto) {
-					dir = StringDirection(_text, lastNewlineStart, b->from());
-				}
-				if (lastNewline) {
-					lastNewline->_nextDir = dir;
-				} else {
-					_startDir = dir;
-				}
+		const auto b = block.get();
+		const auto _btype = b->type();
+		const auto blockHeight = CountBlockHeight(b, _st);
+		if (_btype == TextBlockType::Newline) {
+			if (!lineHeight) {
+				lineHeight = blockHeight;
 			}
-			lastNewlineStart = b->from();
+			accumulate_max(maxWidth, width);
+			accumulate_max(qmaxwidth, width);
+
+			const auto index = quoteIndex(b);
+			if (qindex != index) {
+				_minHeight += qpadding.bottom();
+				if (quote) {
+					quote->maxWidth = qmaxwidth.ceil().toInt();
+					quote->minHeight = _minHeight - qoldheight;
+				}
+				qoldheight = _minHeight;
+				qindex = index;
+				quote = quoteByIndex(qindex);
+				qpadding = quotePadding(quote);
+				qminwidth = quoteMinWidth(quote);
+				qmaxwidth = qminwidth;
+				_minHeight += qpadding.top();
+				qpadding.setTop(0);
+			}
+			if (initial) {
+				computeParagraphDirection(b->position());
+			}
+			lastNewlineStart = b->position();
 			lastNewline = &block.unsafe<NewlineBlock>();
 
 			_minHeight += lineHeight;
 			lineHeight = 0;
-			last_rBearing = b->f_rbearing();
-			last_rPadding = b->f_rpadding();
+			last_rBearing = 0;// b->f_rbearing(); (0 for newline)
+			last_rPadding = 0;// b->f_rpadding(); (0 for newline)
 
-			accumulate_max(_maxWidth, _width);
-			_width = (b->f_width() - last_rBearing);
+			width = qminwidth;
+			// + (b->f_width() - last_rBearing); (0 for newline)
 			continue;
 		}
 
@@ -234,9 +507,10 @@ void String::recountNaturalSize(bool initial, Qt::LayoutDirection optionsDir) {
 		// But when we layout block and we're sure that _maxWidth is enough
 		// for all the blocks to fit on their line we check each block, even the
 		// intermediate one with a large negative right bearing.
-		accumulate_max(_maxWidth, _width);
+		accumulate_max(maxWidth, width);
+		accumulate_max(qmaxwidth, width);
 
-		_width += last_rBearing + (last_rPadding + b->f_width() - b__f_rbearing);
+		width += last_rBearing + (last_rPadding + b->f_width() - b__f_rbearing);
 		lineHeight = qMax(lineHeight, blockHeight);
 
 		last_rBearing = b__f_rbearing;
@@ -244,20 +518,23 @@ void String::recountNaturalSize(bool initial, Qt::LayoutDirection optionsDir) {
 		continue;
 	}
 	if (initial) {
-		Qt::LayoutDirection dir = optionsDir;
-		if (dir == Qt::LayoutDirectionAuto) {
-			dir = StringDirection(_text, lastNewlineStart, _text.size());
-		}
-		if (lastNewline) {
-			lastNewline->_nextDir = dir;
-		} else {
-			_startDir = dir;
-		}
+		computeParagraphDirection(_text.size());
 	}
-	if (_width > 0) {
-		if (!lineHeight) lineHeight = CountBlockHeight(_blocks.back().get(), _st);
-		_minHeight += lineHeight;
-		accumulate_max(_maxWidth, _width);
+	if (width > 0) {
+		if (!lineHeight) {
+			lineHeight = CountBlockHeight(_blocks.back().get(), _st);
+		}
+		_minHeight += qpadding.top() + lineHeight + qpadding.bottom();
+		accumulate_max(maxWidth, width);
+		accumulate_max(qmaxwidth, width);
+	}
+	_maxWidth = maxWidth.ceil().toInt();
+	if (quote) {
+		quote->maxWidth = qmaxwidth.ceil().toInt();
+		quote->minHeight = _minHeight - qoldheight;
+		_endsWithQuote = true;
+	} else {
+		_endsWithQuote = false;
 	}
 }
 
@@ -269,7 +546,7 @@ int String::countMaxMonospaceWidth() const {
 	for (auto &block : _blocks) {
 		auto b = block.get();
 		auto _btype = b->type();
-		if (_btype == TextBlockTNewline) {
+		if (_btype == TextBlockType::Newline) {
 			last_rBearing = b->f_rbearing();
 			last_rPadding = b->f_rpadding();
 
@@ -283,8 +560,8 @@ int String::countMaxMonospaceWidth() const {
 			_width = (b->f_width() - last_rBearing);
 			continue;
 		}
-		if (!(b->flags() & (TextBlockFPre | TextBlockFCode))
-			&& (b->type() != TextBlockTSkip)) {
+		if (!(b->flags() & (TextBlockFlag::Pre | TextBlockFlag::Code))
+			&& (b->type() != TextBlockType::Skip)) {
 			fullMonospace = false;
 		}
 		auto b__f_rbearing = b->f_rbearing(); // cache
@@ -347,13 +624,15 @@ void String::setMarkedText(const style::TextStyle &st, const TextWithEntities &t
 	recountNaturalSize(true, options.dir);
 }
 
-void String::setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk) {
-	if (!lnkIndex || lnkIndex > _links.size()) return;
-	_links[lnkIndex - 1] = lnk;
+void String::setLink(uint16 index, const ClickHandlerPtr &link) {
+	const auto extended = _extended.get();
+	if (extended && index > 0 && index <= extended->links.size()) {
+		extended->links[index - 1] = link;
+	}
 }
 
 void String::setSpoilerRevealed(bool revealed, anim::type animated) {
-	const auto data = _spoiler.data.get();
+	const auto data = _extended ? _extended->spoiler.get() : nullptr;
 	if (!data) {
 		return;
 	} else if (data->revealed == revealed) {
@@ -378,34 +657,50 @@ void String::setSpoilerRevealed(bool revealed, anim::type animated) {
 }
 
 void String::setSpoilerLinkFilter(Fn<bool(const ClickContext&)> filter) {
-	Expects(_spoiler.data != nullptr);
+	Expects(_extended && _extended->spoiler);
 
-	_spoiler.data->link = std::make_shared<SpoilerClickHandler>(
+	_extended->spoiler->link = std::make_shared<SpoilerClickHandler>(
 		this,
 		std::move(filter));
 }
 
 bool String::hasLinks() const {
-	return !_links.isEmpty();
+	return _extended && !_extended->links.empty();
 }
 
 bool String::hasSpoilers() const {
-	return (_spoiler.data != nullptr);
+	return _extended && (_extended->spoiler != nullptr);
 }
 
 bool String::hasSkipBlock() const {
-	return _blocks.empty() ? false : _blocks.back()->type() == TextBlockTSkip;
+	return !_blocks.empty()
+		&& (_blocks.back()->type() == TextBlockType::Skip);
 }
 
 bool String::updateSkipBlock(int width, int height) {
-	if (!_blocks.empty() && _blocks.back()->type() == TextBlockTSkip) {
+	if (!_blocks.empty() && _blocks.back()->type() == TextBlockType::Skip) {
 		const auto block = static_cast<SkipBlock*>(_blocks.back().get());
-		if (block->width() == width && block->height() == height) {
+		if (block->f_width().toInt() == width && block->height() == height) {
 			return false;
 		}
-		_text.resize(block->from());
+		const auto size = block->position();
+		_text.resize(size);
 		_blocks.pop_back();
+		removeModificationsAfter(size);
+	} else if (_endsWithQuote) {
+		insertModifications(_text.size(), 1);
+		_text.push_back(QChar::LineFeed);
+		_blocks.push_back(Block::Newline(
+			_st->font,
+			_text,
+			_text.size() - 1,
+			1,
+			0,
+			0,
+			0));
+		_skipBlockAddedNewline = true;
 	}
+	insertModifications(_text.size(), 1);
 	_text.push_back('_');
 	_blocks.push_back(Block::Skip(
 		_st->font,
@@ -420,18 +715,71 @@ bool String::updateSkipBlock(int width, int height) {
 }
 
 bool String::removeSkipBlock() {
-	if (_blocks.empty() || _blocks.back()->type() != TextBlockTSkip) {
+	if (_blocks.empty() || _blocks.back()->type() != TextBlockType::Skip) {
 		return false;
+	} else if (_skipBlockAddedNewline) {
+		const auto size = _blocks.back()->position() - 1;
+		_text.resize(size);
+		_blocks.pop_back();
+		_blocks.pop_back();
+		_skipBlockAddedNewline = false;
+		removeModificationsAfter(size);
+	} else {
+		const auto size = _blocks.back()->position();
+		_text.resize(size);
+		_blocks.pop_back();
+		removeModificationsAfter(size);
 	}
-	_text.resize(_blocks.back()->from());
-	_blocks.pop_back();
 	recountNaturalSize(false);
 	return true;
 }
 
+void String::insertModifications(int position, int delta) {
+	auto &modifications = ensureExtended()->modifications;
+	auto i = end(modifications);
+	while (i != begin(modifications) && (--i)->position >= position) {
+		if (i->position < position) {
+			break;
+		} else if (delta > 0) {
+			++i->position;
+		} else if (i->position == position) {
+			break;
+		}
+	}
+	if (i != end(modifications) && i->position == position) {
+		++i->skipped;
+	} else {
+		modifications.insert(i, {
+			.position = position,
+			.skipped = uint16(delta < 0 ? (-delta) : 0),
+			.added = (delta > 0),
+		});
+	}
+}
+
+void String::removeModificationsAfter(int size) {
+	if (!_extended) {
+		return;
+	}
+	auto &modifications = _extended->modifications;
+	for (auto i = end(modifications); i != begin(modifications);) {
+		--i;
+		if (i->position > size) {
+			i = modifications.erase(i);
+		} else if (i->position == size) {
+			i->added = false;
+			if (!i->skipped) {
+				i = modifications.erase(i);
+			}
+		} else {
+			break;
+		}
+	}
+}
+
 int String::countWidth(int width, bool breakEverywhere) const {
 	if (QFixed(width) >= _maxWidth) {
-		return _maxWidth.ceil().toInt();
+		return _maxWidth;
 	}
 
 	QFixed maxLineWidth = 0;
@@ -454,10 +802,21 @@ int String::countHeight(int width, bool breakEverywhere) const {
 	return result;
 }
 
-void String::countLineWidths(int width, QVector<int> *lineWidths, bool breakEverywhere) const {
-	enumerateLines(width, breakEverywhere, [&](QFixed lineWidth, int lineHeight) {
-		lineWidths->push_back(lineWidth.ceil().toInt());
+std::vector<int> String::countLineWidths(int width) const {
+	return countLineWidths(width, {});
+}
+
+std::vector<int> String::countLineWidths(
+		int width,
+		LineWidthsOptions options) const {
+	auto result = std::vector<int>();
+	if (options.reserve) {
+		result.reserve(options.reserve);
+	}
+	enumerateLines(width, options.breakEverywhere, [&](QFixed lineWidth, int lineHeight) {
+		result.push_back(lineWidth.ceil().toInt());
 	});
+	return result;
 }
 
 template <typename Callback>
@@ -465,24 +824,42 @@ void String::enumerateLines(
 		int w,
 		bool breakEverywhere,
 		Callback callback) const {
-	QFixed width = w;
-	if (width < _minResizeWidth) width = _minResizeWidth;
+	const auto width = QFixed(std::max(w, _minResizeWidth));
 
-	int lineHeight = 0;
-	QFixed widthLeft = width, last_rBearing = 0, last_rPadding = 0;
+	auto qindex = quoteIndex(nullptr);
+	auto quote = quoteByIndex(qindex);
+	auto qpadding = quotePadding(quote);
+	auto widthLeft = width - qpadding.left() - qpadding.right();
+	auto lineHeight = 0;
+	auto last_rBearing = QFixed();
+	auto last_rPadding = QFixed();
 	bool longWordLine = true;
 	for (auto &b : _blocks) {
 		auto _btype = b->type();
-		int blockHeight = CountBlockHeight(b.get(), _st);
+		const auto blockHeight = CountBlockHeight(b.get(), _st);
 
-		if (_btype == TextBlockTNewline) {
-			if (!lineHeight) lineHeight = blockHeight;
+		if (_btype == TextBlockType::Newline) {
+			if (!lineHeight) {
+				lineHeight = blockHeight;
+			}
+			lineHeight += qpadding.top();
+			const auto index = quoteIndex(b.get());
+			if (qindex != index) {
+				lineHeight += qpadding.bottom();
+				qindex = index;
+				quote = quoteByIndex(qindex);
+				qpadding = quotePadding(quote);
+			} else {
+				qpadding.setTop(0);
+			}
+
 			callback(width - widthLeft, lineHeight);
 
 			lineHeight = 0;
-			last_rBearing = b->f_rbearing();
-			last_rPadding = b->f_rpadding();
-			widthLeft = width - (b->f_width() - last_rBearing);
+			last_rBearing = 0;// b->f_rbearing(); (0 for newline)
+			last_rPadding = 0;// b->f_rpadding(); (0 for newline)
+			widthLeft = width - qpadding.left() - qpadding.right();
+			// - (b->f_width() - last_rBearing); (0 for newline)
 
 			longWordLine = true;
 			continue;
@@ -500,7 +877,7 @@ void String::enumerateLines(
 			continue;
 		}
 
-		if (_btype == TextBlockTText) {
+		if (_btype == TextBlockType::Text) {
 			const auto t = &b.unsafe<TextBlock>();
 			if (t->_words.isEmpty()) { // no words in this block, spaces only => layout this block in the same line
 				last_rPadding += b->f_rpadding();
@@ -543,12 +920,16 @@ void String::enumerateLines(
 					j_width = (j->f_width() >= 0) ? j->f_width() : -j->f_width();
 				}
 
-				callback(width - widthLeft, lineHeight);
+				callback(width - widthLeft, lineHeight + qpadding.top());
+				qpadding.setTop(0);
 
 				lineHeight = qMax(0, blockHeight);
 				last_rBearing = j->f_rbearing();
 				last_rPadding = j->f_rpadding();
-				widthLeft = width - (j_width - last_rBearing);
+				widthLeft = width
+					- qpadding.left()
+					- qpadding.right()
+					- (j_width - last_rBearing);
 
 				longWordLine = !wordEndsHere;
 				f = j + 1;
@@ -558,23 +939,36 @@ void String::enumerateLines(
 			continue;
 		}
 
-		callback(width - widthLeft, lineHeight);
+		callback(width - widthLeft, lineHeight + qpadding.top());
+		qpadding.setTop(0);
 
 		lineHeight = qMax(0, blockHeight);
 		last_rBearing = b__f_rbearing;
 		last_rPadding = b->f_rpadding();
-		widthLeft = width - (b->f_width() - last_rBearing);
+		widthLeft = width
+			- qpadding.left()
+			- qpadding.right()
+			- (b->f_width() - last_rBearing);
 
 		longWordLine = true;
 		continue;
 	}
 	if (widthLeft < width) {
-		callback(width - widthLeft, lineHeight);
+		callback(
+			width - widthLeft,
+			lineHeight + qpadding.top() + qpadding.bottom());
 	}
 }
 
 void String::draw(QPainter &p, const PaintContext &context) const {
 	Renderer(*this).draw(p, context);
+}
+
+StateResult String::getState(
+		QPoint point,
+		GeometryDescriptor geometry,
+		StateRequest request) const {
+	return Renderer(*this).getState(point, std::move(geometry), request);
 }
 
 void String::draw(Painter &p, int32 left, int32 top, int32 w, style::align align, int32 yFrom, int32 yTo, TextSelection selection, bool fullWidthSelection) const {
@@ -605,14 +999,18 @@ void String::drawElided(Painter &p, int32 left, int32 top, int32 w, int32 lines,
 		.palette = &p.textPalette(),
 		.paused = p.inactive(),
 		.selection = selection,
-		.elisionLines = lines,
+		.elisionHeight = ((!isEmpty() && lines > 1)
+			? (lines * _st->font->height)
+			: 0),
 		.elisionRemoveFromEnd = removeFromEnd,
+		.elisionOneLine = (lines == 1),
 	});
 }
 
 void String::drawLeft(Painter &p, int32 left, int32 top, int32 width, int32 outerw, style::align align, int32 yFrom, int32 yTo, TextSelection selection) const {
 	Renderer(*this).draw(p, {
 		.position = { left, top },
+		//.outerWidth = outerw,
 		.availableWidth = width,
 		.align = align,
 		.clip = (yTo >= 0
@@ -622,7 +1020,6 @@ void String::drawLeft(Painter &p, int32 left, int32 top, int32 width, int32 oute
 		.paused = p.inactive(),
 		.selection = selection,
 	});
-	draw(p, style::RightToLeft() ? (outerw - left - width) : left, top, width, align, yFrom, yTo, selection);
 }
 
 void String::drawLeftElided(Painter &p, int32 left, int32 top, int32 width, int32 outerw, int32 lines, style::align align, int32 yFrom, int32 yTo, int32 removeFromEnd, bool breakEverywhere, TextSelection selection) const {
@@ -638,7 +1035,13 @@ void String::drawRightElided(Painter &p, int32 right, int32 top, int32 width, in
 }
 
 StateResult String::getState(QPoint point, int width, StateRequest request) const {
-	return Renderer(*this).getState(point, width, request);
+	if (isEmpty()) {
+		return {};
+	}
+	return Renderer(*this).getState(
+		point,
+		SimpleGeometry(width, _st->font->height, 0, 0, false, false),
+		request);
 }
 
 StateResult String::getStateLeft(QPoint point, int width, int outerw, StateRequest request) const {
@@ -646,7 +1049,17 @@ StateResult String::getStateLeft(QPoint point, int width, int outerw, StateReque
 }
 
 StateResult String::getStateElided(QPoint point, int width, StateRequestElided request) const {
-	return Renderer(*this).getStateElided(point, width, request);
+	if (isEmpty()) {
+		return {};
+	}
+	return Renderer(*this).getState(point, SimpleGeometry(
+		width,
+		_st->font->height,
+		(request.lines > 1) ? (request.lines * _st->font->height) : 0,
+		request.removeFromEnd,
+		(request.lines == 1),
+		request.flags & StateRequest::Flag::BreakEverywhere
+	), static_cast<StateRequest>(request));
 }
 
 StateResult String::getStateElidedLeft(QPoint point, int width, int outerw, StateRequestElided request) const {
@@ -661,7 +1074,7 @@ TextSelection String::adjustSelection(TextSelection selection, TextSelectType se
 
 			// Full selection of monospace entity.
 			for (const auto &b : _blocks) {
-				if (b->from() < from) {
+				if (b->position() < from) {
 					continue;
 				}
 				if (!IsMono(b->flags())) {
@@ -723,15 +1136,95 @@ TextSelection String::adjustSelection(TextSelection selection, TextSelectType se
 }
 
 bool String::isEmpty() const {
-	return _blocks.empty() || _blocks[0]->type() == TextBlockTSkip;
+	return _blocks.empty() || _blocks[0]->type() == TextBlockType::Skip;
 }
 
-uint16 String::countBlockEnd(const TextBlocks::const_iterator &i, const TextBlocks::const_iterator &e) const {
-	return (i + 1 == e) ? _text.size() : (*(i + 1))->from();
+not_null<ExtendedData*> String::ensureExtended() {
+	if (!_extended) {
+		_extended = std::make_unique<ExtendedData>();
+	}
+	return _extended.get();
 }
 
-uint16 String::countBlockLength(const String::TextBlocks::const_iterator &i, const String::TextBlocks::const_iterator &e) const {
-	return countBlockEnd(i, e) - (*i)->from();
+uint16 String::countBlockEnd(
+		const TextBlocks::const_iterator &i,
+		const TextBlocks::const_iterator &e) const {
+	return (i + 1 == e) ? _text.size() : (*(i + 1))->position();
+}
+
+uint16 String::countBlockLength(
+		const TextBlocks::const_iterator &i,
+		const TextBlocks::const_iterator &e) const {
+	return countBlockEnd(i, e) - (*i)->position();
+}
+
+QuoteDetails *String::quoteByIndex(int index) const {
+	Expects(!index
+		|| (_extended && index <= _extended->quotes.size()));
+
+	return index ? &_extended->quotes[index - 1] : nullptr;
+}
+
+int String::quoteIndex(const AbstractBlock *block) const {
+	Expects(!block || block->type() == TextBlockType::Newline);
+
+	return block
+		? static_cast<const NewlineBlock*>(block)->quoteIndex()
+		: _startQuoteIndex;
+}
+
+const style::QuoteStyle &String::quoteStyle(
+		not_null<QuoteDetails*> quote) const {
+	return quote->pre ? _st->pre : _st->blockquote;
+}
+
+QMargins String::quotePadding(QuoteDetails *quote) const {
+	if (!quote) {
+		return {};
+	}
+	const auto &st = quoteStyle(quote);
+	const auto skip = st.verticalSkip;
+	const auto top = st.header;
+	return st.padding + QMargins(0, top + skip, 0, skip);
+}
+
+int String::quoteMinWidth(QuoteDetails *quote) const {
+	if (!quote) {
+		return 0;
+	}
+	const auto qpadding = quotePadding(quote);
+	const auto &qheader = quoteHeaderText(quote);
+	const auto &qst = quoteStyle(quote);
+	const auto radius = qst.radius;
+	const auto header = qst.header;
+	const auto outline = qst.outline;
+	const auto iconsize = (!qst.icon.empty())
+		? std::max(
+			qst.icon.width() + qst.iconPosition.x(),
+			qst.icon.height() + qst.iconPosition.y())
+		: 0;
+	const auto corner = std::max({ header, radius, outline, iconsize });
+	const auto top = qpadding.left()
+		+ (qheader.isEmpty()
+			? 0
+			: (_st->font->monospace()->width(qheader)
+				+ _st->pre.headerPosition.x()))
+		+ std::max(
+			qpadding.right(),
+			(!qst.icon.empty()
+				? (qst.iconPosition.x() + qst.icon.width())
+				: 0));
+	return std::max(top, 2 * corner);
+}
+
+const QString &String::quoteHeaderText(QuoteDetails *quote) const {
+	static const auto kEmptyHeader = QString();
+	static const auto kDefaultHeader = u"code"_q;
+	return (!quote || !quote->pre)
+		? kEmptyHeader
+		: quote->language.isEmpty()
+		? kDefaultHeader
+		: quote->language;
 }
 
 template <
@@ -749,92 +1242,93 @@ void String::enumerateText(
 		return;
 	}
 
-	int lnkIndex = 0;
-	uint16 lnkFrom = 0;
+	int linkIndex = 0;
+	uint16 linkPosition = 0;
+	int quoteIndex = _startQuoteIndex;
 
-	int spoilerIndex = 0;
-	uint16 spoilerFrom = 0;
-
-	int32 flags = 0;
+	TextBlockFlags flags = {};
 	for (auto i = _blocks.cbegin(), e = _blocks.cend(); true; ++i) {
-		int blockLnkIndex = (i == e) ? 0 : (*i)->lnkIndex();
-		int blockSpoilerIndex = (i == e) ? 0 : (*i)->spoilerIndex();
-		uint16 blockFrom = (i == e) ? _text.size() : (*i)->from();
-		int32 blockFlags = (i == e) ? 0 : (*i)->flags();
-
-		if (IsMono(blockFlags)) {
-			blockLnkIndex = 0;
-		}
-		if (blockLnkIndex && !_links.at(blockLnkIndex - 1)) { // ignore empty links
-			blockLnkIndex = 0;
-		}
-		if (blockLnkIndex != lnkIndex) {
-			if (lnkIndex) {
-				auto rangeFrom = qMax(selection.from, lnkFrom);
-				auto rangeTo = qMin(selection.to, blockFrom);
+		const auto blockPosition = (i == e)
+			? uint16(_text.size())
+			: (*i)->position();
+		const auto blockFlags = (i == e) ? TextBlockFlags() : (*i)->flags();
+		const auto blockQuoteIndex = (i == e)
+			? 0
+			: ((*i)->type() != TextBlockType::Newline)
+			? quoteIndex
+			: static_cast<const NewlineBlock*>(i->get())->quoteIndex();
+		const auto blockLinkIndex = [&] {
+			if (IsMono(blockFlags) || (i == e)) {
+				return 0;
+			}
+			const auto result = (*i)->linkIndex();
+			return (result && _extended && _extended->links[result - 1])
+				? result
+				: 0;
+		}();
+		if (blockLinkIndex != linkIndex) {
+			if (linkIndex) {
+				auto rangeFrom = qMax(selection.from, linkPosition);
+				auto rangeTo = qMin(selection.to, blockPosition);
 				if (rangeTo > rangeFrom) { // handle click handler
-					const auto r = base::StringViewMid(_text, rangeFrom, rangeTo - rangeFrom);
+					const auto r = base::StringViewMid(
+						_text,
+						rangeFrom,
+						rangeTo - rangeFrom);
 					// Ignore links that are partially copied.
-					const auto handler = (lnkFrom != rangeFrom || blockFrom != rangeTo)
+					const auto handler = (linkPosition != rangeFrom
+						|| blockPosition != rangeTo
+						|| !_extended)
 						? nullptr
-						: _links.at(lnkIndex - 1);
+						: _extended->links[linkIndex - 1];
 					const auto type = handler
 						? handler->getTextEntity().type
 						: EntityType::Invalid;
 					clickHandlerFinishCallback(r, handler, type);
 				}
 			}
-			lnkIndex = blockLnkIndex;
-			if (lnkIndex) {
-				lnkFrom = blockFrom;
-				const auto handler = _links.at(lnkIndex - 1);
+			linkIndex = blockLinkIndex;
+			if (linkIndex) {
+				linkPosition = blockPosition;
+				const auto handler = _extended
+					? _extended->links[linkIndex - 1]
+					: nullptr;
 				clickHandlerStartCallback(handler
 					? handler->getTextEntity().type
 					: EntityType::Invalid);
 			}
 		}
-		if (blockSpoilerIndex != spoilerIndex) {
-			if (spoilerIndex) {
-				auto rangeFrom = qMax(selection.from, spoilerFrom);
-				auto rangeTo = qMin(selection.to, blockFrom);
-				if (rangeTo > rangeFrom) { // handle click handler
-					const auto r = base::StringViewMid(_text, rangeFrom, rangeTo - rangeFrom);
-					// Ignore links that are partially copied.
-					const auto handler = (spoilerFrom != rangeFrom
-						|| blockFrom != rangeTo
-						|| !_spoiler.data)
-						? nullptr
-						: _spoiler.data->link;
-					const auto type = EntityType::Spoiler;
-					clickHandlerFinishCallback(r, handler, type);
-				}
-			}
-			spoilerIndex = blockSpoilerIndex;
-			if (spoilerIndex) {
-				spoilerFrom = blockFrom;
-				clickHandlerStartCallback(EntityType::Spoiler);
-			}
-		}
 
-		const auto checkBlockFlags = (blockFrom >= selection.from)
-			&& (blockFrom <= selection.to);
-		if (checkBlockFlags && blockFlags != flags) {
-			flagsChangeCallback(flags, blockFlags);
+		const auto checkBlockFlags = (blockPosition >= selection.from)
+			&& (blockPosition <= selection.to);
+		if (checkBlockFlags
+			&& (blockFlags != flags
+				|| ((flags & TextBlockFlag::Pre)
+					&& blockQuoteIndex != quoteIndex))) {
+			flagsChangeCallback(
+				flags,
+				quoteIndex,
+				blockFlags,
+				blockQuoteIndex);
 			flags = blockFlags;
 		}
-		if (i == e || (lnkIndex ? lnkFrom : blockFrom) >= selection.to) {
+		quoteIndex = blockQuoteIndex;
+		if (i == e
+			|| (linkIndex ? linkPosition : blockPosition) >= selection.to) {
 			break;
 		}
 
 		const auto blockType = (*i)->type();
-		if (blockType == TextBlockTSkip) continue;
+		if (blockType == TextBlockType::Skip) {
+			continue;
+		}
 
-		auto rangeFrom = qMax(selection.from, blockFrom);
+		auto rangeFrom = qMax(selection.from, blockPosition);
 		auto rangeTo = qMin(
 			selection.to,
-			uint16(blockFrom + countBlockLength(i, e)));
+			uint16(blockPosition + countBlockLength(i, e)));
 		if (rangeTo > rangeFrom) {
-			const auto customEmojiData = (blockType == TextBlockTCustomEmoji)
+			const auto customEmojiData = (blockType == TextBlockType::CustomEmoji)
 				? static_cast<const CustomEmojiBlock*>(i->get())->_custom->entityData()
 				: QString();
 			appendPartCallback(
@@ -845,14 +1339,14 @@ void String::enumerateText(
 }
 
 bool String::hasPersistentAnimation() const {
-	return _hasCustomEmoji || _spoiler.data;
+	return _hasCustomEmoji || hasSpoilers();
 }
 
 void String::unloadPersistentAnimation() {
 	if (_hasCustomEmoji) {
 		for (const auto &block : _blocks) {
 			const auto raw = block.get();
-			if (raw->type() == TextBlockTCustomEmoji) {
+			if (raw->type() == TextBlockType::CustomEmoji) {
 				static_cast<const CustomEmojiBlock*>(raw)->_custom->unload();
 			}
 		}
@@ -871,12 +1365,12 @@ OnlyCustomEmoji String::toOnlyCustomEmoji() const {
 	result.lines.emplace_back();
 	for (const auto &block : _blocks) {
 		const auto raw = block.get();
-		if (raw->type() == TextBlockTCustomEmoji) {
+		if (raw->type() == TextBlockType::CustomEmoji) {
 			const auto custom = static_cast<const CustomEmojiBlock*>(raw);
 			result.lines.back().push_back({
 				.entityData = custom->_custom->entityData(),
 			});
-		} else if (raw->type() == TextBlockTNewline) {
+		} else if (raw->type() == TextBlockType::Newline) {
 			result.lines.emplace_back();
 		}
 	}
@@ -885,6 +1379,11 @@ OnlyCustomEmoji String::toOnlyCustomEmoji() const {
 
 bool String::hasNotEmojiAndSpaces() const {
 	return _hasNotEmojiAndSpaces;
+}
+
+const std::vector<Modification> &String::modifications() const {
+	static const auto kEmpty = std::vector<Modification>();
+	return _extended ? _extended->modifications : kEmpty;
 }
 
 QString String::toString(TextSelection selection) const {
@@ -925,54 +1424,56 @@ TextForMimeData String::toText(
 		result.rich.entities.insert(i, std::move(entity));
 	};
 	auto linkStart = 0;
-	auto spoilerStart = 0;
 	auto markdownTrackers = composeEntities
 		? std::vector<MarkdownTagTracker>{
-			{ TextBlockFItalic, EntityType::Italic },
-			{ TextBlockFBold, EntityType::Bold },
-			{ TextBlockFSemibold, EntityType::Semibold },
-			{ TextBlockFUnderline, EntityType::Underline },
-			{ TextBlockFPlainLink, EntityType::PlainLink },
-			{ TextBlockFStrikeOut, EntityType::StrikeOut },
-			{ TextBlockFCode, EntityType::Code }, // #TODO entities
-			{ TextBlockFPre, EntityType::Pre },
+			{ TextBlockFlag::Italic, EntityType::Italic },
+			{ TextBlockFlag::Bold, EntityType::Bold },
+			{ TextBlockFlag::Semibold, EntityType::Semibold },
+			{ TextBlockFlag::Underline, EntityType::Underline },
+			{ TextBlockFlag::Spoiler, EntityType::Spoiler },
+			{ TextBlockFlag::StrikeOut, EntityType::StrikeOut },
+			{ TextBlockFlag::Code, EntityType::Code }, // #TODO entities
+			{ TextBlockFlag::Pre, EntityType::Pre },
+			{ TextBlockFlag::Blockquote, EntityType::Blockquote },
 		} : std::vector<MarkdownTagTracker>();
-	const auto flagsChangeCallback = [&](int32 oldFlags, int32 newFlags) {
+	const auto flagsChangeCallback = [&](
+			TextBlockFlags oldFlags,
+			int oldQuoteIndex,
+			TextBlockFlags newFlags,
+			int newQuoteIndex) {
 		if (!composeEntities) {
 			return;
 		}
 		for (auto &tracker : markdownTrackers) {
 			const auto flag = tracker.flag;
-			if ((oldFlags & flag) && !(newFlags & flag)) {
+			const auto quoteWithLanguage = (flag == TextBlockFlag::Pre);
+			const auto quoteWithLanguageChanged = quoteWithLanguage
+				&& (oldQuoteIndex != newQuoteIndex);
+			const auto data = (quoteWithLanguage && oldQuoteIndex)
+				? _extended->quotes[oldQuoteIndex - 1].language
+				: QString();
+			if (((oldFlags & flag) && !(newFlags & flag))
+				|| quoteWithLanguageChanged) {
 				insertEntity({
 					tracker.type,
 					tracker.start,
-					int(result.rich.text.size()) - tracker.start });
-			} else if ((newFlags & flag) && !(oldFlags & flag)) {
+					int(result.rich.text.size()) - tracker.start,
+					data,
+				});
+			}
+			if (((newFlags & flag) && !(oldFlags & flag))
+				|| quoteWithLanguageChanged) {
 				tracker.start = result.rich.text.size();
 			}
 		}
 	};
 	const auto clickHandlerStartCallback = [&](EntityType type) {
-		if (type == EntityType::Spoiler) {
-			spoilerStart = result.rich.text.size();
-		} else {
-			linkStart = result.rich.text.size();
-		}
+		linkStart = result.rich.text.size();
 	};
 	const auto clickHandlerFinishCallback = [&](
 			QStringView inText,
 			const ClickHandlerPtr &handler,
 			EntityType type) {
-		if (type == EntityType::Spoiler) {
-			insertEntity({
-				type,
-				spoilerStart,
-				int(result.rich.text.size() - spoilerStart),
-				QString(),
-			});
-			return;
-		}
 		if (!handler || (!composeExpanded && !composeEntities)) {
 			return;
 		}
@@ -1061,21 +1562,21 @@ IsolatedEmoji String::toIsolatedEmoji() const {
 	}
 	auto result = IsolatedEmoji();
 	const auto skip = (_blocks.empty()
-		|| _blocks.back()->type() != TextBlockTSkip) ? 0 : 1;
+		|| _blocks.back()->type() != TextBlockType::Skip) ? 0 : 1;
 	if ((_blocks.size() > kIsolatedEmojiLimit + skip) || hasSpoilers()) {
 		return {};
 	}
 	auto index = 0;
 	for (const auto &block : _blocks) {
 		const auto type = block->type();
-		if (block->lnkIndex()) {
+		if (block->linkIndex()) {
 			return {};
-		} else if (type == TextBlockTEmoji) {
+		} else if (type == TextBlockType::Emoji) {
 			result.items[index++] = block.unsafe<EmojiBlock>()._emoji;
-		} else if (type == TextBlockTCustomEmoji) {
+		} else if (type == TextBlockType::CustomEmoji) {
 			result.items[index++]
 				= block.unsafe<CustomEmojiBlock>()._custom->entityData();
-		} else if (type != TextBlockTSkip) {
+		} else if (type != TextBlockType::Skip) {
 			return {};
 		}
 	}
@@ -1083,16 +1584,13 @@ IsolatedEmoji String::toIsolatedEmoji() const {
 }
 
 void String::clear() {
-	clearFields();
 	_text.clear();
-}
-
-void String::clearFields() {
 	_blocks.clear();
-	_links.clear();
-	_spoiler.data = nullptr;
+	_extended = nullptr;
 	_maxWidth = _minHeight = 0;
-	_startDir = Qt::LayoutDirectionAuto;
+	_startQuoteIndex = 0;
+	_startParagraphLTR = false;
+	_startParagraphRTL = false;
 }
 
 bool IsBad(QChar ch) {
@@ -1186,7 +1684,7 @@ bool IsSpace(QChar ch) {
 		|| (ch == QChar(8203)/*Zero width space.*/);
 }
 
-bool IsDiac(QChar ch) { // diac and variation selectors
+bool IsDiacritic(QChar ch) { // diacritic and variation selectors
 	return (ch.category() == QChar::Mark_NonSpacing)
 		|| (ch == 1652)
 		|| (ch >= 64606 && ch <= 64611);

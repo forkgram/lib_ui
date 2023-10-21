@@ -1264,7 +1264,7 @@ bool IsProgressiveJpeg(const QByteArray &bytes) {
 		info.err = jpeg_std_error(&jerr);
 		jerr.error_exit = [](j_common_ptr cinfo) {
 			(*cinfo->err->output_message)(cinfo);
-			throw new std::exception;
+			throw std::exception();
 		};
 
 		jpeg_create_decompress(&info);
@@ -1296,7 +1296,7 @@ QByteArray MakeProgressiveJpeg(const QByteArray &bytes) {
 		dstinfo.err = jpeg_std_error(&jerr);
 		jerr.error_exit = [](j_common_ptr cinfo) {
 			(*cinfo->err->output_message)(cinfo);
-			throw new std::exception;
+			throw std::exception();
 		};
 
 		jpeg_create_decompress(&srcinfo);
