@@ -2041,7 +2041,8 @@ QString InputField::getTextPart(
 		block = block.next();
 		if (block != till) {
 			tagAccumulator.feed(
-				TagWithoutCustomEmoji(tagAccumulator.currentTag()),
+				TagWithoutCustomEmoji(
+					block.charFormat().property(kTagProperty).toString()),
 				result.size());
 			result.append('\n');
 			markdownTagAccumulator.feed(newline, 1, lastTag);
