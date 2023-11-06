@@ -169,7 +169,6 @@ private:
 	QVarLengthArray<QRect, kSpoilersRectsSize> _highlightRects;
 
 	std::optional<CustomEmoji::Context> _customEmojiContext;
-	int _customEmojiSize = 0;
 	int _customEmojiSkip = 0;
 	int _indexOfElidedBlock = -1; // For spoilers.
 
@@ -180,7 +179,6 @@ private:
 	int _paragraphLength = 0;
 	bool _paragraphHasBidi = false;
 	QVarLengthArray<QScriptAnalysis, 4096> _paragraphAnalysis;
-	QFixed _paragraphWidthRemaining = 0;
 
 	// current quote data
 	QuoteDetails *_quote = nullptr;
@@ -204,6 +202,7 @@ private:
 	QFixed _x, _wLeft, _last_rPadding;
 	int _y = 0;
 	int _yDelta = 0;
+	int _lineIndex = 0;
 	int _lineHeight = 0;
 	int _fontHeight = 0;
 	bool _breakEverywhere = false;

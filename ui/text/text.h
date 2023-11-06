@@ -146,23 +146,21 @@ struct SpecialColor {
 
 struct LineGeometry {
 	int left = 0;
-	int top = 0;
 	int width = 0;
 	bool elided = false;
 };
 struct GeometryDescriptor {
-	Fn<LineGeometry(LineGeometry line)> layout;
+	Fn<LineGeometry(int line)> layout;
 	bool breakEverywhere = false;
+	bool *outElided = nullptr;
 };
 
 [[nodiscard]] not_null<SpoilerMessCache*> DefaultSpoilerCache();
 
 [[nodiscard]] GeometryDescriptor SimpleGeometry(
 	int availableWidth,
-	int fontHeight,
-	int elisionHeight,
+	int elisionLines,
 	int elisionRemoveFromEnd,
-	bool elisionOneLine,
 	bool elisionBreakEverywhere);
 
 constexpr auto kMaxQuoteOutlines = 3;
@@ -230,8 +228,8 @@ struct PaintContext {
 	HighlightInfoRequest *highlight = nullptr;
 
 	int elisionHeight = 0;
+	int elisionLines = 0;
 	int elisionRemoveFromEnd = 0;
-	bool elisionOneLine = false;
 	bool elisionBreakEverywhere = false;
 };
 
@@ -275,6 +273,7 @@ public:
 		std::vector<int> lineWidths;
 	};
 	struct DimensionsRequest {
+		bool breakEverywhere = false;
 		bool lineWidths = false;
 		int reserve = 0;
 	};
@@ -414,13 +413,17 @@ private:
 		FlagsChangeCallback flagsChangeCallback) const;
 
 	// Template method for countWidth(), countHeight(), countLineWidths().
-	// callback(lineWidth, lineHeight) will be called for all lines with:
-	// QFixed lineWidth, int lineHeight
+	// callback(lineWidth, lineBottom) will be called for all lines with:
+	// QFixed lineWidth, int lineBottom
 	template <typename Callback>
 	void enumerateLines(
 		int w,
 		bool breakEverywhere,
-		Callback callback) const;
+		Callback &&callback) const;
+	template <typename Callback>
+	void enumerateLines(
+		GeometryDescriptor geometry,
+		Callback &&callback) const;
 
 	void insertModifications(int position, int delta);
 	void removeModificationsAfter(int size);
