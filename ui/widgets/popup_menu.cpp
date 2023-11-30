@@ -383,11 +383,7 @@ void PopupMenu::handleMenuResize() {
 		const auto newSize = QSize(
 			newWidth,
 			_padding.top() + scrollHeight + _padding.bottom());
-		if (::Platform::IsMac()) {
-			setMaximumSize(newSize);
-			setMinimumSize(newSize);
-		}
-		resize(newSize);
+		setFixedSize(newSize);
 	}
 	_inner = rect().marginsRemoved(_padding);
 }
@@ -1069,7 +1065,9 @@ void PopupMenu::showPrepared(TriggeredSource source) {
 
 	startShowAnimation();
 
-	Platform::UpdateOverlayed(this);
+	if (::Platform::IsWindows()) {
+		ForceFullRepaintSync(this);
+	}
 	show();
 	Platform::ShowOverAll(this);
 	raise();

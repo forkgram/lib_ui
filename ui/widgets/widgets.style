@@ -1412,8 +1412,6 @@ defaultMultilineToast: Toast(defaultToast) {
 	minWidth: 160px;
 }
 
-shakeShift: 4px;
-
 // Windows specific title
 
 windowTitleButtonWidth: 36px;

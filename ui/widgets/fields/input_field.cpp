@@ -32,7 +32,7 @@
 #include <QtWidgets/QTextEdit>
 
 #ifdef Q_OS_WIN
-#include "base/platform/win/base_windows_h.h"
+#include <windows.h>
 #include <WinUser.h>
 #elif !defined DESKTOP_APP_DISABLE_X11_INTEGRATION // Q_OS_WIN
 #include "base/platform/linux/base_linux_xcb_utilities.h"
@@ -51,7 +51,6 @@ constexpr auto kReplaceTagId = QTextFormat::UserProperty + 3;
 constexpr auto kTagProperty = QTextFormat::UserProperty + 4;
 constexpr auto kCustomEmojiText = QTextFormat::UserProperty + 5;
 constexpr auto kCustomEmojiLink = QTextFormat::UserProperty + 6;
-constexpr auto kCustomEmojiId = QTextFormat::UserProperty + 7;
 const auto kObjectReplacementCh = QChar(QChar::ObjectReplacementCharacter);
 const auto kObjectReplacement = QString::fromRawData(
 	&kObjectReplacementCh,
@@ -65,6 +64,7 @@ const auto &kTagPre = InputField::kTagPre;
 const auto &kTagBlockquote = InputField::kTagBlockquote;
 const auto &kTagSpoiler = InputField::kTagSpoiler;
 const auto &kCustomEmojiFormat = InputField::kCustomEmojiFormat;
+const auto &kCustomEmojiId = InputField::kCustomEmojiId;
 const auto kTagCheckLinkMeta = u"^:/:/:^"_q;
 const auto kNewlineChars = QString("\r\n")
 	+ QChar(0xfdd0) // QTextBeginningOfFrame
@@ -158,7 +158,7 @@ bool IsNewline(QChar ch) {
 	return base::StringViewMid(
 		link,
 		skip,
-		(index <= skip) ? -1 : (index - skip - 1)
+		(index <= skip) ? -1 : (index - skip)
 	).toULongLong();
 }
 
@@ -711,14 +711,6 @@ QTextImageFormat PrepareEmojiFormat(EmojiPtr emoji, const QFont &font) {
 	return result;
 }
 
-// Optimization: with null page size document does not re-layout
-// on each insertText / mergeCharFormat.
-void PrepareFormattingOptimization(not_null<QTextDocument*> document) {
-	if (!document->pageSize().isNull()) {
-		document->setPageSize(QSizeF(0, 0));
-	}
-}
-
 void RemoveDocumentTags(
 		const style::InputField &st,
 		not_null<QTextDocument*> document,
@@ -954,8 +946,8 @@ const QString InputField::kTagPre = u"```"_q;
 const QString InputField::kTagSpoiler = u"||"_q;
 const QString InputField::kTagBlockquote = u">"_q;
 const QString InputField::kCustomEmojiTagStart = u"custom-emoji://"_q;
-const int InputField::kCustomEmojiFormat
-	= QTextFormat::UserObject + 1;
+const int InputField::kCustomEmojiFormat = QTextFormat::UserObject + 1;
+const int InputField::kCustomEmojiId = QTextFormat::UserProperty + 7;
 
 class InputField::Inner final : public QTextEdit {
 public:
@@ -2352,6 +2344,12 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 			break;
 		}
 	}
+}
+
+void InputField::forceProcessContentsChanges() {
+	PostponeCall(this, [=] {
+		handleContentsChanged();
+	});
 }
 
 void InputField::documentContentsChanged(
@@ -3982,5 +3980,13 @@ rpl::producer<Qt::KeyboardModifiers> InputField::submits() const {
 }
 
 InputField::~InputField() = default;
+
+// Optimization: with null page size document does not re-layout
+// on each insertText / mergeCharFormat.
+void PrepareFormattingOptimization(not_null<QTextDocument*> document) {
+	if (!document->pageSize().isNull()) {
+		document->setPageSize(QSizeF(0, 0));
+	}
+}
 
 } // namespace Ui

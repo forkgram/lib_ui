@@ -1,10 +1,9 @@
-/*
-This file is part of Telegram Desktop,
-the official desktop application for the Telegram messaging service.
-
-For license and copyright information please follow this link:
-https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
-*/
+// This file is part of Desktop App Toolkit,
+// a set of libraries for developing nice desktop applications.
+//
+// For license and copyright information please follow this link:
+// https://github.com/desktop-app/legal/blob/master/LEGAL
+//
 #include "ui/widgets/separate_panel.h"
 
 #include "ui/widgets/shadow.h"
@@ -671,21 +670,15 @@ void SeparatePanel::initGeometry(QSize size) {
 		const QRect initRect(QPoint(), size);
 		return initRect.translated(center - initRect.center()).marginsAdded(_padding);
 	}();
-	setGeometry(rect);
-	setMinimumSize(rect.size());
-	setMaximumSize(rect.size());
+	move(rect.topLeft());
+	setFixedSize(rect.size());
 	updateControlsGeometry();
 }
 
 void SeparatePanel::updateGeometry(QSize size) {
-	const auto rect = QRect(
-		x(),
-		y(),
+	setFixedSize(
 		_padding.left() + size.width() + _padding.right(),
 		_padding.top() + size.height() + _padding.bottom());
-	setGeometry(rect);
-	setMinimumSize(rect.size());
-	setMaximumSize(rect.size());
 	updateControlsGeometry();
 	update();
 }

@@ -6,13 +6,13 @@
 //
 #include "ui/platform/win/ui_utility_win.h"
 
-#include "base/platform/win/base_windows_h.h"
 #include "ui/widgets/popup_menu.h"
 
 #include <QtWidgets/QApplication>
 #include <QtGui/QWindow>
 #include <QtCore/QAbstractNativeEventFilter>
 
+#include <windows.h>
 #include <wrl/client.h>
 #include <Shobjidl.h>
 
@@ -22,18 +22,6 @@ namespace Ui::Platform {
 
 bool IsApplicationActive() {
 	return QApplication::activeWindow() != nullptr;
-}
-
-void UpdateOverlayed(not_null<QWidget*> widget) {
-	const auto wm = widget->testAttribute(Qt::WA_Mapped);
-	const auto wv = widget->testAttribute(Qt::WA_WState_Visible);
-	if (!wm) widget->setAttribute(Qt::WA_Mapped, true);
-	if (!wv) widget->setAttribute(Qt::WA_WState_Visible, true);
-	widget->update();
-	QEvent e(QEvent::UpdateRequest);
-	QGuiApplication::sendEvent(widget, &e);
-	if (!wm) widget->setAttribute(Qt::WA_Mapped, false);
-	if (!wv) widget->setAttribute(Qt::WA_WState_Visible, false);
 }
 
 void IgnoreAllActivation(not_null<QWidget*> widget) {
