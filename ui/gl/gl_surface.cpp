@@ -9,6 +9,7 @@
 #include "ui/rp_widget.h"
 #include "ui/painter.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtGui/QtEvents>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QWindow>
@@ -38,7 +39,6 @@ private:
 	const std::unique_ptr<Renderer> _renderer;
 	QMetaObject::Connection _connection;
 	QSize _deviceSize;
-	bool _inPaintEvent = false;
 
 };
 
@@ -85,16 +85,10 @@ void SurfaceOpenGL::resizeGL(int w, int h) {
 }
 
 void SurfaceOpenGL::paintEvent(QPaintEvent *e) {
-	if (_inPaintEvent) {
-		return;
-	}
-	_inPaintEvent = true;
 	if (_deviceSize != size() * devicePixelRatio()) {
-		QResizeEvent event = { size(), size() };
-		resizeEvent(&event);
+		QCoreApplication::postEvent(this, new QResizeEvent(size(), size()));
 	}
 	QOpenGLWidget::paintEvent(e);
-	_inPaintEvent = false;
 }
 
 void SurfaceOpenGL::paintGL() {
