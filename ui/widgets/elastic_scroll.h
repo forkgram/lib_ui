@@ -22,6 +22,8 @@ extern const style::ScrollArea &defaultScrollArea;
 
 namespace Ui {
 
+inline constexpr auto kPixelToAngleDelta = 2;
+
 struct ScrollState {
 	int visibleFrom = 0;
 	int visibleTill = 0;
@@ -273,6 +275,6 @@ private:
 
 };
 
-[[nodiscard]] QPoint ScrollDelta(not_null<QWheelEvent*> e);
+[[nodiscard]] QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch = false);
 
 } // namespace Ui

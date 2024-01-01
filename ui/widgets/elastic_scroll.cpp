@@ -24,6 +24,7 @@ constexpr auto kOverscrollReturnDuration = crl::time(250);
 constexpr auto kOverscrollFromThreshold = -(1 << 30);
 constexpr auto kOverscrollTillThreshold = (1 << 30);
 constexpr auto kTouchOverscrollMultiplier = 2;
+constexpr auto kMagicScrollMultiplier = Platform::IsLinux() ? 2.5 : 1.;
 
 constexpr auto kLogA = 16.;
 constexpr auto kLogB = 10.;
@@ -658,7 +659,7 @@ bool ElasticScroll::handleWheelEvent(not_null<QWheelEvent*> e, bool touch) {
 	const auto guard = gsl::finally([&] {
 		_lastScroll = now;
 	});
-	const auto pixels = ScrollDelta(e);
+	const auto pixels = ScrollDelta(e, touch);
 	auto delta = _vertical ? -pixels.y() : pixels.x();
 	if (std::abs(_vertical ? pixels.x() : pixels.y()) >= std::abs(delta)) {
 		delta = 0;
@@ -1270,17 +1271,17 @@ rpl::producer<ElasticScrollMovement> ElasticScroll::movementValue() const {
 	return _movement.value();
 }
 
-QPoint ScrollDelta(not_null<QWheelEvent*> e) {
+QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch) {
 	const auto convert = [](QPoint point) {
 		return QPoint(
 			style::ConvertScale(point.x()),
 			style::ConvertScale(point.y()));
 	};
-	if (Platform::IsMac()
-		|| (Platform::IsWindows() && e->phase() != Qt::NoScrollPhase)) {
-		return convert(e->pixelDelta());
+	if (!e->pixelDelta().isNull()) {
+		return convert(e->pixelDelta())
+			* (touch ? 1. : kMagicScrollMultiplier);
 	}
-	return convert(e->angleDelta() * style::DevicePixelRatio());
+	return convert(e->angleDelta()) / kPixelToAngleDelta;
 }
 
 } // namespace Ui

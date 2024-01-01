@@ -11,6 +11,7 @@
 #include "ui/platform/win/ui_windows_direct_manipulation.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "ui/widgets/rp_window.h"
+#include "ui/widgets/elastic_scroll.h"
 #include "base/platform/win/base_windows_safe_library.h"
 #include "base/platform/base_platform_info.h"
 #include "base/integration.h"
@@ -502,12 +503,14 @@ void WindowHelper::handleDirectManipulationEvent(
 			::GetCursorPos(&global);
 			auto local = global;
 			::ScreenToClient(_handle, &local);
+			const auto dpi = _dpi.current() ? double(_dpi.current()) : 96.;
+			const auto delta = QPointF(event.delta) / (dpi / 96.);
 			QWindowSystemInterface::handleWheelEvent(
 				windowHandle,
 				QPointF(local.x, local.y),
 				QPointF(global.x, global.y),
-				event.delta,
-				event.delta,
+				delta.toPoint(),
+				(delta * kPixelToAngleDelta).toPoint(),
 				LookupModifiers(),
 				phase,
 				Qt::MouseEventSynthesizedBySystem);
