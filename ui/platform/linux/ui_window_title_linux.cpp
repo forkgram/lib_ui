@@ -8,11 +8,11 @@
 
 #include "base/platform/linux/base_linux_xdp_utilities.h"
 
+#include "base/integration.h"
+
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 #include "base/platform/linux/base_linux_xsettings.h"
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
-
-#include <glibmm.h>
 
 namespace Ui {
 namespace Platform {
@@ -76,7 +76,11 @@ TitleControls::Layout TitleControlsLayout() {
 		static const XDP::SettingWatcher settingWatcher(
 			"org.gnome.desktop.wm.preferences",
 			"button-layout",
-			[] { NotifyTitleControlsLayoutChanged(); });
+			[] {
+				base::Integration::Instance().enterFromEventLoop([] {
+					NotifyTitleControlsLayoutChanged();
+				});
+			});
 
 		return true;
 	}();
@@ -103,9 +107,7 @@ TitleControls::Layout TitleControlsLayout() {
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 	const auto portalResult = []() -> std::optional<TitleControls::Layout> {
-		namespace XDP = base::Platform::XDP;
-
-		const auto decorationLayout = XDP::ReadSetting<Glib::ustring>(
+		auto decorationLayout = base::Platform::XDP::ReadSetting(
 			"org.gnome.desktop.wm.preferences",
 			"button-layout");
 
@@ -114,7 +116,7 @@ TitleControls::Layout TitleControlsLayout() {
 		}
 
 		return GtkKeywordsToTitleControlsLayout(
-			QString::fromStdString(*decorationLayout));
+			QString::fromStdString(decorationLayout->get_string(nullptr)));
 	}();
 
 	if (portalResult.has_value()) {
