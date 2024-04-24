@@ -14,11 +14,18 @@
 #include <cmath>
 
 namespace style {
+
+[[nodiscard]] const QString &SystemFontTag();
+void SetCustomFont(const QString &font);
+
+[[nodiscard]] QFont ResolveFont(
+	const QString &custom,
+	uint32 flags,
+	int size);
+
 namespace internal {
 
 void StartFonts();
-[[nodiscard]] QString GetFontOverride(int32 flags = 0);
-[[nodiscard]] QString MonospaceFont();
 
 void destroyFonts();
 int registerFontFamily(const QString &family);
