@@ -16,7 +16,6 @@
 #include <QtCore/QVector>
 #include <QtGui/QFontInfo>
 #include <QtGui/QFontDatabase>
-#include <QtWidgets/QApplication>
 
 void style_InitFontsResource() {
 #ifdef Q_OS_MAC // Use resources from the .app bundle on macOS.
@@ -188,7 +187,7 @@ struct Metrics {
 
 	const auto family = font.family();
 	const auto basic = u"Open Sans"_q;
-	if (family == basic) {
+	if (family == basic || !adjust) {
 		return simple();
 	}
 
@@ -251,15 +250,12 @@ struct Metrics {
 
 	const auto adjusted = [&](int size, const QFontMetricsF &metrics) {
 		const auto full = metrics.tightBoundingRect(Full);
-		const auto desiredTightAscent = -desiredFull.y();
 		const auto desiredTightHeight = desiredFull.height();
-		const auto ascentAdd = basicMetrics.ascent() - desiredTightAscent;
 		const auto heightAdd = basicMetrics.height() - desiredTightHeight;
-		const auto tightAscent = -full.y();
 		const auto tightHeight = full.height();
 		return Metrics{
 			.pixelSize = size,
-			.ascent = tightAscent + ascentAdd,
+			.ascent = basicMetrics.ascent(),
 			.height = tightHeight + heightAdd,
 		};
 	};
@@ -317,9 +313,8 @@ struct Metrics {
 [[nodiscard]] FontResolveResult ResolveFont(
 		const QString &family,
 		FontFlags flags,
-		int size,
-		bool skipSizeAdjustment) {
-	auto font = QFont();
+		int size) {
+	auto font = QFont(QFont().family());
 
 	const auto monospace = (flags & FontFlag::Monospace) != 0;
 	const auto system = !monospace && (family == SystemFontTag());
@@ -337,6 +332,10 @@ struct Metrics {
 	}
 	font.setPixelSize(size);
 
+	const auto adjust = (overriden || system);
+	const auto metrics = ComputeMetrics(font, adjust);
+	font.setPixelSize(metrics.pixelSize);
+
 	font.setWeight((flags & (FontFlag::Bold | FontFlag::Semibold))
 		? QFont::DemiBold
 		: QFont::Normal);
@@ -353,17 +352,14 @@ struct Metrics {
 	font.setUnderline(flags & FontFlag::Underline);
 	font.setStrikeOut(flags & FontFlag::StrikeOut);
 
-	const auto adjust = (overriden && !skipSizeAdjustment);
-	const auto metrics = ComputeMetrics(font, adjust);
-	font.setPixelSize(metrics.pixelSize);
-
+	const auto index = (family == Custom) ? 0 : RegisterFontFamily(family);
 	return {
 		.font = font,
 		.ascent = metrics.ascent,
 		.height = metrics.height,
 		.iascent = int(base::SafeRound(metrics.ascent)),
 		.iheight = int(base::SafeRound(metrics.height)),
-		.requestedFamily = RegisterFontFamily(family),
+		.requestedFamily = index,
 		.requestedSize = size,
 		.requestedFlags = flags,
 	};
@@ -402,10 +398,6 @@ void StartFonts() {
 	QFont::insertSubstitutions(name, list);
 #endif // Q_OS_MAC
 #endif // !LIB_UI_USE_PACKAGED_FONTS
-
-	auto appFont = QApplication::font();
-	appFont.setStyleStrategy(QFont::PreferQuality);
-	QApplication::setFont(appFont);
 }
 
 void DestroyFonts() {
@@ -509,8 +501,7 @@ void Font::init(
 				ResolveFont(
 					family ? FontFamilies[family] : Custom,
 					flags,
-					size,
-					family != 0),
+					size),
 				modified)).first;
 		QtFontsKeys.emplace(QtFontKey(i->second->data.f), key);
 	}
@@ -518,7 +509,7 @@ void Font::init(
 }
 
 OwnedFont::OwnedFont(const QString &custom, FontFlags flags, int size)
-: _data(ResolveFont(custom, flags, size, false), nullptr) {
+: _data(ResolveFont(custom, flags, size), nullptr) {
 	_font._data = &_data;
 }
 
