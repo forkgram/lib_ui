@@ -6,8 +6,9 @@
 //
 #include "ui/widgets/fields/input_field.h"
 
-#include "ui/widgets/popup_menu.h"
 #include "ui/text/text.h"
+#include "ui/widgets/labels.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/emoji_config.h"
 #include "ui/ui_utility.h"
 #include "ui/painter.h"
@@ -134,7 +135,7 @@ bool IsNewline(QChar ch) {
 }
 
 [[nodiscard]] bool IsCustomEmojiLink(QStringView link) {
-	return link.startsWith(Ui::InputField::kCustomEmojiTagStart);
+	return link.startsWith(InputField::kCustomEmojiTagStart);
 }
 
 [[nodiscard]] QString MakeUniqueCustomEmojiLink(QStringView link) {
@@ -153,7 +154,7 @@ bool IsNewline(QChar ch) {
 }
 
 [[nodiscard]] uint64 CustomEmojiIdFromLink(QStringView link) {
-	const auto skip = Ui::InputField::kCustomEmojiTagStart.size();
+	const auto skip = InputField::kCustomEmojiTagStart.size();
 	const auto index = link.indexOf('?', skip + 1);
 	return base::StringViewMid(
 		link,
@@ -1132,7 +1133,7 @@ QSizeF CustomEmojiObject::intrinsicSize(
 	const auto width = size + st::emojiPadding * 2.;
 	const auto height = std::max(_font->height * 1., size);
 	if (!_skip) {
-		const auto emoji = Ui::Text::AdjustCustomEmojiSize(st::emojiSize);
+		const auto emoji = Text::AdjustCustomEmojiSize(st::emojiSize);
 		_skip = (st::emojiSize - emoji) / 2;
 	}
 	return { width, height };
@@ -2428,7 +2429,6 @@ void InputField::documentContentsChanged(
 	if (_correcting) {
 		return;
 	}
-
 	// In case of input method events Qt emits
 	// document content change signals for a whole
 	// text block where the even took place.
@@ -2474,7 +2474,7 @@ void InputField::documentContentsChanged(
 		QTextCursor(document).endEditBlock();
 		handleContentsChanged();
 		const auto added = charsAdded - _emojiSurrogateAmount;
-		_documentContentsChanges.fire({position, charsRemoved, added});
+		_documentContentsChanges.fire({ position, charsRemoved, added });
 		_emojiSurrogateAmount = 0;
 	});
 
@@ -2936,7 +2936,9 @@ void InputField::keyPressEventInner(QKeyEvent *e) {
 #endif // Q_OS_MAC
 	} else {
 		const auto text = e->text();
-		const auto oldPosition = textCursor().position();
+		const auto old = textCursor();
+		const auto oldPosition = old.position();
+		const auto oldSelection = old.hasSelection();
 		const auto oldModifiers = e->modifiers();
 		const auto allowedModifiers = (enter && ctrl)
 			? (~Qt::ControlModifier)
@@ -2947,7 +2949,19 @@ void InputField::keyPressEventInner(QKeyEvent *e) {
 		if (changeModifiers) {
 			e->setModifiers(oldModifiers & allowedModifiers);
 		}
-		_inner->QTextEdit::keyPressEvent(e);
+		if (e == QKeySequence::InsertParagraphSeparator) {
+			// qtbase commit dbb9579566f3accd8aa5fe61db9692991117afd3 introduced
+			// special logic for repeated 'Enter' key presses, which drops the
+			// block format instead of inserting a newline in case the block format
+			// is non-trivial. For custom fonts we use non-trivial block formats
+			// always for the entire QTextEdit, so we revert that logic and simply
+			// insert a newline as it was before Qt 6.X.Y where this was added.
+			textCursor().insertBlock();
+			_inner->ensureCursorVisible();
+			e->accept();
+		} else {
+			_inner->QTextEdit::keyPressEvent(e);
+		}
 		if (changeModifiers) {
 			e->setModifiers(oldModifiers);
 		}
@@ -2960,7 +2974,10 @@ void InputField::keyPressEventInner(QKeyEvent *e) {
 			} else if (e->key() == Qt::Key_PageDown || e->key() == Qt::Key_Down) {
 				cursor.movePosition(QTextCursor::End, e->modifiers().testFlag(Qt::ShiftModifier) ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor);
 				check = true;
-			} else if (e->key() == Qt::Key_Left || e->key() == Qt::Key_Right || e->key() == Qt::Key_Backspace) {
+			} else if (!oldSelection
+				&& (e->key() == Qt::Key_Left
+					|| e->key() == Qt::Key_Right
+					|| e->key() == Qt::Key_Backspace)) {
 				e->ignore();
 			}
 			if (check) {
@@ -3191,7 +3208,7 @@ void InputField::inputMethodEventInner(QInputMethodEvent *e) {
 	}
 	_inputMethodCommit = e->commitString();
 
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = MakeWeak(this);
 	_inner->QTextEdit::inputMethodEvent(e);
 
 	if (weak && _inputMethodCommit.has_value()) {
@@ -3625,9 +3642,13 @@ void InputField::commitMarkdownLinkEdit(
 	_insertedTags.clear();
 
 	_reverseMarkdownReplacement = false;
+	_correcting = true;
+	cursor.joinPreviousEditBlock();
 	cursor.setCharFormat(_defaultCharFormat);
 	cursor.setBlockFormat(_defaultBlockFormat);
+	cursor.endEditBlock();
 	_inner->setTextCursor(cursor);
+	_correcting = false;
 }
 
 void InputField::toggleSelectionMarkdown(const QString &tag) {
@@ -4065,6 +4086,54 @@ void PrepareFormattingOptimization(not_null<QTextDocument*> document) {
 int FieldCharacterCount(not_null<InputField*> field) {
 	// This method counts emoji properly.
 	return field->lastTextSizeWithoutSurrogatePairsCount();
+}
+
+void AddLengthLimitLabel(not_null<InputField*> field, int limit) {
+	struct State {
+		rpl::variable<int> length;
+	};
+	const auto state = field->lifetime().make_state<State>();
+	state->length = rpl::single(
+		rpl::empty
+	) | rpl::then(field->changes()) | rpl::map([=] {
+		return int(field->getLastText().size());
+	});
+	const auto allowExceed = std::max(limit / 2, 9);
+	field->setMaxLength(limit + allowExceed);
+	const auto threshold = std::min(limit / 2, 9);
+	auto warningText = state->length.value() | rpl::map([=](int count) {
+		const auto left = limit - count;
+		return (left < threshold) ? QString::number(left) : QString();
+	});
+	const auto warning = CreateChild<FlatLabel>(
+		field.get(),
+		std::move(warningText),
+		st::defaultInputFieldLimit);
+
+	const auto maxSize = st::defaultInputFieldLimit.style.font->width(
+		QString::number(-allowExceed));
+	const auto add = std::max(maxSize - field->st().textMargins.right(), 0);
+	if (add) {
+		field->setAdditionalMargins({ 0, 0, add, 0 });
+	}
+	state->length.value() | rpl::map(
+		rpl::mappers::_1 > limit
+	) | rpl::start_with_next([=](bool exceeded) {
+		warning->setTextColorOverride(exceeded
+			? st::attentionButtonFg->c
+			: std::optional<QColor>());
+	}, warning->lifetime());
+	rpl::combine(
+		field->sizeValue(),
+		warning->sizeValue()
+	) | rpl::start_with_next([=] {
+		// Baseline alignment.
+		const auto top = field->st().textMargins.top()
+			+ field->st().font->ascent
+			- st::defaultInputFieldLimit.style.font->ascent;
+		warning->moveToRight(0, top);
+	}, warning->lifetime());
+	warning->setAttribute(Qt::WA_TransparentForMouseEvents);
 }
 
 } // namespace Ui
