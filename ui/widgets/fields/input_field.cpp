@@ -63,6 +63,7 @@ const auto &kTagStrikeOut = InputField::kTagStrikeOut;
 const auto &kTagCode = InputField::kTagCode;
 const auto &kTagPre = InputField::kTagPre;
 const auto &kTagBlockquote = InputField::kTagBlockquote;
+const auto &kTagBlockquoteCollapsed = InputField::kTagBlockquoteCollapsed;
 const auto &kTagSpoiler = InputField::kTagSpoiler;
 const auto &kCustomEmojiFormat = InputField::kCustomEmojiFormat;
 const auto &kCustomEmojiId = InputField::kCustomEmojiId;
@@ -736,7 +737,7 @@ QTextCharFormat PrepareTagFormat(
 	auto result = QTextCharFormat();
 	auto font = st.font;
 	auto color = std::optional<style::color>();
-	auto bg = std::optional<style::color>();
+	auto bg = std::optional<QColor>();
 	auto replaceWhat = QString();
 	auto replaceWith = QString();
 	const auto applyOne = [&](QStringView tag) {
@@ -759,14 +760,14 @@ QTextCharFormat PrepareTagFormat(
 			font = font->underline();
 		} else if (tag == kTagStrikeOut) {
 			font = font->strikeout();
-		} else if (tag == kTagBlockquote) {
+		} else if (tag == kTagBlockquote || tag == kTagBlockquoteCollapsed) {
 			color = st::defaultTextPalette.monoFg;
 			font = font->italic();
 		} else if (tag == kTagCode || IsTagPre(tag)) {
 			color = st::defaultTextPalette.monoFg;
 			font = font->monospace();
 		} else if (tag == kTagSpoiler) {
-			bg = st::msgInDateFg;
+			bg = st::msgInDateFg->c;
 		}
 	};
 	for (const auto &tag : TextUtilities::SplitTags(tag)) {
@@ -948,6 +949,7 @@ const QString InputField::kTagCode = u"`"_q;
 const QString InputField::kTagPre = u"```"_q;
 const QString InputField::kTagSpoiler = u"||"_q;
 const QString InputField::kTagBlockquote = u">"_q;
+const QString InputField::kTagBlockquoteCollapsed = u">^"_q;
 const QString InputField::kCustomEmojiTagStart = u"custom-emoji://"_q;
 const int InputField::kCustomEmojiFormat = QTextFormat::UserObject + 1;
 const int InputField::kCustomEmojiId = QTextFormat::UserProperty + 7;
@@ -1176,6 +1178,16 @@ void CustomEmojiObject::clear() {
 
 void CustomEmojiObject::setNow(crl::time now) {
 	_now = now;
+}
+
+bool MarkdownEnabledState::disabled() const {
+	return v::is<MarkdownDisabled>(data);
+}
+
+bool MarkdownEnabledState::enabledForTag(QStringView tag) const {
+	const auto yes = std::get_if<MarkdownEnabled>(&data);
+	return yes
+		&& (yes->tagsSubset.empty() || yes->tagsSubset.contains(tag));
 }
 
 InputField::InputField(
@@ -1460,16 +1472,22 @@ void InputField::setInstantReplacesEnabled(rpl::producer<bool> enabled) {
 	}, lifetime());
 }
 
-void InputField::setMarkdownReplacesEnabled(rpl::producer<bool> enabled) {
+void InputField::setMarkdownReplacesEnabled(bool enabled) {
+	setMarkdownReplacesEnabled(
+		rpl::single(MarkdownEnabledState{ MarkdownEnabled() }));
+}
+
+void InputField::setMarkdownReplacesEnabled(
+		rpl::producer<MarkdownEnabledState> enabled) {
 	std::move(
 		enabled
-	) | rpl::start_with_next([=](bool value) {
-		if (_markdownEnabled != value) {
-			_markdownEnabled = value;
-			if (_markdownEnabled) {
-				handleContentsChanged();
-			} else {
+	) | rpl::start_with_next([=](MarkdownEnabledState state) {
+		if (_markdownEnabledState != state) {
+			_markdownEnabledState = state;
+			if (_markdownEnabledState.disabled()) {
 				_lastMarkdownTags = {};
+			} else {
+				handleContentsChanged();
 			}
 		}
 	}, lifetime());
@@ -2532,7 +2550,7 @@ void InputField::handleContentsChanged() {
 		-1,
 		_lastTextWithTags.tags,
 		tagsChanged,
-		_markdownEnabled ? &_lastMarkdownTags : nullptr);
+		_markdownEnabledState.disabled() ? nullptr : &_lastMarkdownTags);
 
 	//highlightMarkdown();
 
@@ -2717,7 +2735,7 @@ TextWithTags InputField::getTextWithTagsPart(int start, int end) const {
 }
 
 TextWithTags InputField::getTextWithAppliedMarkdown() const {
-	if (!_markdownEnabled || _lastMarkdownTags.empty()) {
+	if (_markdownEnabledState.disabled() || _lastMarkdownTags.empty()) {
 		return getTextWithTags();
 	}
 	const auto &originalText = _lastTextWithTags.text;
@@ -3002,7 +3020,7 @@ TextWithTags InputField::getTextWithTagsSelected() const {
 }
 
 bool InputField::handleMarkdownKey(QKeyEvent *e) {
-	if (!_markdownEnabled) {
+	if (_markdownEnabledState.disabled()) {
 		return false;
 	}
 	const auto modifiers = e->modifiers()
@@ -3032,23 +3050,29 @@ bool InputField::handleMarkdownKey(QKeyEvent *e) {
 		return false;
 #endif // !Q_OS_WIN && DESKTOP_APP_DISABLE_X11_INTEGRATION
 	};
-	if (e == QKeySequence::Bold) {
+	const auto enabled = [&](QStringView tag) {
+		return _markdownEnabledState.enabledForTag(tag);
+	};
+	if (enabled(kTagBold) && e == QKeySequence::Bold) {
 		toggleSelectionMarkdown(kTagBold);
-	} else if (e == QKeySequence::Italic) {
+	} else if (enabled(kTagItalic) && e == QKeySequence::Italic) {
 		toggleSelectionMarkdown(kTagItalic);
-	} else if (e == QKeySequence::Underline) {
+	} else if (enabled(kTagUnderline) && e == QKeySequence::Underline) {
 		toggleSelectionMarkdown(kTagUnderline);
-	} else if (matches(kStrikeOutSequence)) {
+	} else if (enabled(kTagStrikeOut) && matches(kStrikeOutSequence)) {
 		toggleSelectionMarkdown(kTagStrikeOut);
-	} else if (matches(kMonospaceSequence)) {
+	} else if (enabled(kTagCode)
+		&& enabled(kTagPre)
+		&& matches(kMonospaceSequence)) {
 		toggleSelectionMarkdown(kTagCode);
-	} else if (matches(kBlockquoteSequence) || matchesCtrlShiftDot()) {
+	} else if (enabled(kTagBlockquote)
+		&& (matches(kBlockquoteSequence) || matchesCtrlShiftDot())) {
 		toggleSelectionMarkdown(kTagBlockquote);
-	}  else if (matches(kSpoilerSequence)) {
+	}  else if (enabled(kTagSpoiler) && matches(kSpoilerSequence)) {
 		toggleSelectionMarkdown(kTagSpoiler);
 	} else if (matches(kClearFormatSequence)) {
 		clearSelectionMarkdown();
-	} else if (matches(kEditLinkSequence) && _editLinkCallback) {
+	} else if (_editLinkCallback && matches(kEditLinkSequence)) {
 		const auto cursor = textCursor();
 		editMarkdownLink({
 			cursor.selectionStart(),
@@ -3692,7 +3716,7 @@ void InputField::toggleSelectionMarkdown(const QString &tag) {
 			: (leftForBlock && rightForBlock)
 			? kTagPre
 			: kTagCode;
-		if (tag == kTagBlockquote) {
+		if (tag == kTagBlockquote || tag == kTagBlockquoteCollapsed) {
 			QTextCursor(document()).beginEditBlock();
 			if (!leftForBlock) {
 				auto copy = textCursor();
@@ -3825,7 +3849,7 @@ void InputField::contextMenuEventInner(QContextMenuEvent *e, QMenu *m) {
 void InputField::addMarkdownActions(
 		not_null<QMenu*> menu,
 		QContextMenuEvent *e) {
-	if (!_markdownEnabled) {
+	if (_markdownEnabledState.disabled()) {
 		return;
 	}
 	auto &integration = Integration::Instance();
@@ -3865,6 +3889,9 @@ void InputField::addMarkdownActions(
 			const QString &base,
 			QKeySequence sequence,
 			const QString &tag) {
+		if (!_markdownEnabledState.enabledForTag(tag)) {
+			return;
+		}
 		const auto disabled = !hasText;
 		add(base, sequence, disabled, [=] {
 			toggleSelectionMarkdown(tag);
