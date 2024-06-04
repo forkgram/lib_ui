@@ -1334,9 +1334,13 @@ InputField::InputField(
 	) | rpl::start_with_next([=] {
 		auto cursor = textCursor();
 		if (!cursor.hasSelection() && !cursor.position()) {
+			_correcting = true;
+			cursor.joinPreviousEditBlock();
 			cursor.setCharFormat(_defaultCharFormat);
 			cursor.setBlockFormat(_defaultBlockFormat);
+			cursor.endEditBlock();
 			setTextCursor(cursor);
+			_correcting = false;
 		}
 	}, lifetime());
 	base::qt_signal_producer(
