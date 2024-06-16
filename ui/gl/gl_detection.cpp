@@ -14,11 +14,9 @@
 
 #include <QtCore/QSet>
 #include <QtCore/QFile>
-#include <QtGui/QtEvents>
 #include <QtGui/QWindow>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QOpenGLFunctions>
-#include <QOpenGLWindow>
 #include <QOpenGLWidget>
 
 #ifdef Q_OS_WIN
@@ -39,11 +37,11 @@ bool LastCheckCrashed/* = false*/;
 ANGLE ResolvedANGLE/* = ANGLE::Auto*/;
 #endif // Q_OS_WIN
 
-base::options::toggle AllowLinuxNvidiaOpenGL({
-	.id = kOptionAllowLinuxNvidiaOpenGL,
-	.name = "Allow OpenGL on the NVIDIA drivers (Linux)",
-	.description = "Qt+OpenGL have problems on Linux with NVIDIA drivers.",
-	.scope = base::options::linux,
+base::options::toggle AllowX11NvidiaOpenGL({
+	.id = kOptionAllowX11NvidiaOpenGL,
+	.name = "Allow OpenGL on the NVIDIA drivers (X11)",
+	.description = "Qt+OpenGL have problems on X11 with NVIDIA drivers.",
+	.scope = Platform::IsX11,
 	.restartRequired = true,
 });
 
@@ -57,9 +55,9 @@ void CrashCheckStart() {
 
 } // namespace
 
-const char kOptionAllowLinuxNvidiaOpenGL[] = "allow-linux-nvidia-opengl";
+const char kOptionAllowX11NvidiaOpenGL[] = "allow-linux-nvidia-opengl";
 
-Capabilities CheckCapabilities(QWidget *widget, bool avoidWidgetCreation) {
+Capabilities CheckCapabilities(QWidget *widget) {
 	if (!Platform::IsMac()) {
 		if (ForceDisabled) {
 			LOG_ONCE(("OpenGL: Force-disabled."));
@@ -96,43 +94,19 @@ Capabilities CheckCapabilities(QWidget *widget, bool avoidWidgetCreation) {
 	}
 
 	CrashCheckStart();
-	const auto tester = [&] {
-		std::unique_ptr<QObject> result;
-		if (avoidWidgetCreation) {
-			const auto w = new QOpenGLWindow();
-			auto e = QResizeEvent(QSize(), QSize());
-			w->setFormat(format);
-			w->create();
-			static_cast<QObject*>(w)->event(&e); // Force initialize().
-			w->grabFramebuffer(); // Force makeCurrent().
-			result.reset(w);
-		} else {
-			const auto w = new QOpenGLWidget(widget);
-			w->setFormat(format);
-			w->grabFramebuffer(); // Force initialize().
-			if (!w->window()->windowHandle()) {
-				w->window()->createWinId();
-			}
-			result.reset(w);
-		}
-		return result;
-	}();
-	const auto testerWidget = avoidWidgetCreation
-		? nullptr
-		: static_cast<QOpenGLWidget*>(tester.get());
-	const auto testerWindow = avoidWidgetCreation
-		? static_cast<QOpenGLWindow*>(tester.get())
-		: nullptr;
-	/*const auto testerQWindow = avoidWidgetCreation
-		? static_cast<QWindow*>(tester.get())
-		: testerWidget->window()->windowHandle();*/
+	auto tester = QOpenGLWidget(widget);
+	tester.setFormat(format);
+	tester.grabFramebuffer(); // Force initialize().
+	if (!tester.window()->windowHandle()) {
+		tester.window()->createWinId();
+	}
 	CrashCheckFinish();
 
-	const auto context = avoidWidgetCreation ? testerWindow->context() : testerWidget->context();
+	const auto context = tester.context();
 	if (!context
 		|| !context->isValid()/*
 		// This check doesn't work for a widget with WA_NativeWindow.
-		|| !context->makeCurrent(testerQWindow)*/) {
+		|| !context->makeCurrent(tester.window()->windowHandle())*/) {
 		LOG_ONCE(("OpenGL: Could not create widget in a window."));
 		return {};
 	}
@@ -207,14 +181,14 @@ Capabilities CheckCapabilities(QWidget *widget, bool avoidWidgetCreation) {
 		LOG(("EGL Extensions: %1").arg(egllist.join(", ")));
 #endif // Q_OS_WIN
 
-		if (::Platform::IsLinux()
+		if (::Platform::IsX11()
 			&& version
 			&& QByteArray(version).contains("NVIDIA")) {
 			// https://github.com/telegramdesktop/tdesktop/issues/16830
-			if (AllowLinuxNvidiaOpenGL.value()) {
+			if (AllowX11NvidiaOpenGL.value()) {
 				LOG_ONCE(("OpenGL: Allow on NVIDIA driver (experimental)."));
 			} else {
-				LOG_ONCE(("OpenGL: Disable on NVIDIA driver on Linux."));
+				LOG_ONCE(("OpenGL: Disable on NVIDIA driver on X11."));
 				return false;
 			}
 		}

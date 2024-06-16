@@ -14,9 +14,9 @@
 #include "ui/text/text_entity.h"
 #include "ui/text/text_custom_emoji.h"
 
-#include <QtGui/QTextObjectInterface>
-
 #include <rpl/variable.h>
+
+#include <QtGui/QTextCursor>
 
 class QMenu;
 class QShortcut;
@@ -26,7 +26,7 @@ class QContextMenuEvent;
 class Painter;
 
 namespace Ui::Text {
-class CustomEmoji;
+struct QuotePaintCache;
 } // namespace Ui::Text
 
 namespace style {
@@ -75,41 +75,7 @@ enum class InputSubmitSettings {
 	None,
 };
 
-class CustomEmojiObject : public QObject, public QTextObjectInterface {
-public:
-	using Factory = Fn<std::unique_ptr<Text::CustomEmoji>(QStringView)>;
-
-	CustomEmojiObject(
-		const style::font &font,
-		Factory factory,
-		Fn<bool()> paused);
-	~CustomEmojiObject();
-
-	void *qt_metacast(const char *iid) override;
-
-	QSizeF intrinsicSize(
-		QTextDocument *doc,
-		int posInDocument,
-		const QTextFormat &format) override;
-	void drawObject(
-		QPainter *painter,
-		const QRectF &rect,
-		QTextDocument *doc,
-		int posInDocument,
-		const QTextFormat &format) override;
-
-	void setNow(crl::time now);
-	void clear();
-
-private:
-	const style::font _font;
-	Factory _factory;
-	Fn<bool()> _paused;
-	base::flat_map<uint64, std::unique_ptr<Text::CustomEmoji>> _emoji;
-	crl::time _now = 0;
-	int _skip = 0;
-
-};
+class CustomFieldObject;
 
 struct MarkdownEnabled {
 	base::flat_set<QString> tagsSubset;
@@ -132,6 +98,22 @@ struct MarkdownEnabledState {
 	friend inline bool operator==(
 		const MarkdownEnabledState &,
 		const MarkdownEnabledState &) = default;
+};
+struct InputFieldTextRange {
+	int from = 0;
+	int till = 0;
+
+	friend inline bool operator==(
+		InputFieldTextRange,
+		InputFieldTextRange) = default;
+
+	[[nodiscard]] bool empty() const {
+		return (till <= from);
+	}
+};
+struct InputFieldSpoilerRect {
+	QRect geometry;
+	bool blockquote = false;
 };
 
 class InputField : public RpWidget {
@@ -166,8 +148,11 @@ public:
 	static const QString kTagBlockquote;
 	static const QString kTagBlockquoteCollapsed;
 	static const QString kCustomEmojiTagStart;
+	static const int kCollapsedQuoteFormat; // QTextFormat::ObjectTypes
 	static const int kCustomEmojiFormat; // QTextFormat::ObjectTypes
 	static const int kCustomEmojiId; // QTextFormat::Property
+	static const int kCustomEmojiLink; // QTextFormat::Property
+	static const int kQuoteId; // QTextFormat::Property
 
 	InputField(
 		QWidget *parent,
@@ -199,16 +184,18 @@ public:
 	void setMinHeight(int minHeight);
 	void setMaxHeight(int maxHeight);
 
-	const TextWithTags &getTextWithTags() const {
+	[[nodiscard]] const TextWithTags &getTextWithTags() const {
 		return _lastTextWithTags;
 	}
-	const std::vector<MarkdownTag> &getMarkdownTags() const {
+	[[nodiscard]] const std::vector<MarkdownTag> &getMarkdownTags() const {
 		return _lastMarkdownTags;
 	}
-	TextWithTags getTextWithTagsPart(int start, int end = -1) const;
-	TextWithTags getTextWithAppliedMarkdown() const;
+	[[nodiscard]] TextWithTags getTextWithTagsPart(
+		int start,
+		int end = -1) const;
+	[[nodiscard]] TextWithTags getTextWithAppliedMarkdown() const;
 	void insertTag(const QString &text, QString tagId = QString());
-	bool empty() const {
+	[[nodiscard]] bool empty() const {
 		return _lastTextWithTags.text.isEmpty();
 	}
 	enum class HistoryAction {
@@ -223,9 +210,11 @@ public:
 	// If you need to make some preparations of tags before putting them to QMimeData
 	// (and then to clipboard or to drag-n-drop object), here is a strategy for that.
 	void setTagMimeProcessor(Fn<QString(QStringView)> processor);
-	void setCustomEmojiFactory(
-		CustomEmojiFactory factory,
-		Fn<bool()> paused = nullptr);
+	void setCustomTextContext(
+		Fn<std::any(Fn<void()> repaint)> context,
+		Fn<bool()> pausedEmoji = nullptr,
+		Fn<bool()> pausedSpoiler = nullptr,
+		CustomEmojiFactory factory = nullptr);
 
 	struct EditLinkSelection {
 		int from = 0;
@@ -241,6 +230,8 @@ public:
 			QString text,
 			QString link,
 			EditLinkAction action)> callback);
+	void setEditLanguageCallback(
+		Fn<void(QString now, Fn<void(QString)> save)> callback);
 
 	struct ExtendedContextMenu {
 		QMenu *menu = nullptr;
@@ -269,11 +260,8 @@ public:
 	[[nodiscard]] static QString CustomEmojiLink(QStringView entityData);
 	[[nodiscard]] static QString CustomEmojiEntityData(QStringView link);
 
-	const QString &getLastText() const {
+	[[nodiscard]] const QString &getLastText() const {
 		return _lastTextWithTags.text;
-	}
-	[[nodiscard]] int lastTextSizeWithoutSurrogatePairsCount() const {
-		return _lastTextSizeWithoutSurrogatePairsCount;
 	}
 	void setPlaceholder(
 		rpl::producer<QString> placeholder,
@@ -349,6 +337,9 @@ public:
 		return _markdownTagApplies.events();
 	}
 
+	void setPreCache(Fn<not_null<Ui::Text::QuotePaintCache*>()> make);
+	void setBlockquoteCache(Fn<not_null<Ui::Text::QuotePaintCache*>()> make);
+
 	[[nodiscard]] bool menuShown() const;
 	[[nodiscard]] rpl::producer<bool> menuShownValue() const;
 
@@ -375,6 +366,10 @@ protected:
 private:
 	class Inner;
 	friend class Inner;
+	friend class CustomFieldObject;
+	friend class FieldSpoilerOverlay;
+	using TextRange = InputFieldTextRange;
+	using SpoilerRect = InputFieldSpoilerRect;
 	enum class MarkdownActionType {
 		ToggleTag,
 		EditLink,
@@ -409,10 +404,15 @@ private:
 	void dropEventInner(QDropEvent *e);
 	void inputMethodEventInner(QInputMethodEvent *e);
 	void paintEventInner(QPaintEvent *e);
+	void paintQuotes(QPaintEvent *e);
 
 	void mousePressEventInner(QMouseEvent *e);
 	void mouseReleaseEventInner(QMouseEvent *e);
 	void mouseMoveEventInner(QMouseEvent *e);
+	void leaveEventInner(QEvent *e);
+
+	[[nodiscard]] int lookupActionQuoteId(QPoint point) const;
+	void updateCursorShape();
 
 	QMimeData *createMimeDataFromSelectionInner() const;
 	bool canInsertFromMimeDataInner(const QMimeData *source) const;
@@ -427,11 +427,7 @@ private:
 
 	// "start" and "end" are in coordinates of text where emoji are replaced
 	// by ObjectReplacementCharacter. If "end" = -1 means get text till the end.
-	struct TextPart final {
-		QString text;
-		int textSizeWithoutSurrogatePairsCount = 0;
-	};
-	TextPart getTextPart(
+	[[nodiscard]] QString getTextPart(
 		int start,
 		int end,
 		TagList &outTagsList,
@@ -486,16 +482,17 @@ private:
 		const QString &tag,
 		const QString &edge = QString());
 #endif
-	void addMarkdownTag(int from, int till, const QString &tag);
-	void removeMarkdownTag(int from, int till, const QString &tag);
+	TextRange insertWithTags(TextRange range, TextWithTags text);
+	TextRange addMarkdownTag(TextRange range, const QString &tag);
+	void removeMarkdownTag(TextRange range, const QString &tag);
 	void finishMarkdownTagChange(
-		int from,
-		int till,
+		TextRange range,
 		const TextWithTags &textWithTags);
 	void toggleSelectionMarkdown(const QString &tag);
 	void clearSelectionMarkdown();
 
 	bool revertFormatReplace();
+	bool jumpOutOfBlockByBackspace();
 
 	void paintSurrounding(
 		QPainter &p,
@@ -514,11 +511,21 @@ private:
 		float64 focusedDegree);
 	void customEmojiRepaint();
 	void highlightMarkdown();
+	bool exitQuoteWithNewBlock(int key);
+
+	void blockActionClicked(int quoteId);
+	void editPreLanguage(int quoteId, QStringView tag);
+	void toggleBlockquoteCollapsed(
+		int quoteId,
+		QStringView tag,
+		TextRange range);
 
 	void touchUpdate(QPoint globalPosition);
 	void touchFinish();
 
 	const style::InputField &_st;
+	Fn<not_null<Ui::Text::QuotePaintCache*>()> _preCache;
+	Fn<not_null<Ui::Text::QuotePaintCache*>()> _blockquoteCache;
 
 	Mode _mode = Mode::SingleLine;
 	int _maxLength = -1;
@@ -532,11 +539,16 @@ private:
 		QString text,
 		QString link,
 		EditLinkAction action)> _editLinkCallback;
+	Fn<void(QString now, Fn<void(QString)> save)> _editLanguageCallback;
 	TextWithTags _lastTextWithTags;
 	std::vector<MarkdownTag> _lastMarkdownTags;
 	QString _lastPreEditText;
-	int _lastTextSizeWithoutSurrogatePairsCount = 0;
 	std::optional<QString> _inputMethodCommit;
+	mutable std::vector<TextRange> _spoilerRangesText;
+	mutable std::vector<TextRange> _spoilerRangesEmoji;
+	mutable std::vector<SpoilerRect> _spoilerRects;
+	mutable QColor _blockquoteBg;
+	std::unique_ptr<RpWidget> _spoilerOverlay;
 
 	QMargins _additionalMargins;
 	QMargins _customFontMargins;
@@ -548,7 +560,8 @@ private:
 
 	// Tags list which we should apply while setText() call or insert from mime data.
 	TagList _insertedTags;
-	bool _insertedTagsAreFromMime;
+	bool _insertedTagsAreFromMime = false;
+	bool _insertedTagsReplace = false;
 
 	// Override insert position and charsAdded from complex text editing
 	// (like drag-n-drop in the same text edit field).
@@ -560,13 +573,14 @@ private:
 	int _emojiSurrogateAmount = 0;
 
 	Fn<QString(QStringView)> _tagMimeProcessor;
-	std::unique_ptr<CustomEmojiObject> _customEmojiObject;
+	std::unique_ptr<CustomFieldObject> _customObject;
+	std::optional<QTextCursor> _formattingCursorUpdate;
 
 	SubmitSettings _submitSettings = SubmitSettings::Enter;
 	MarkdownEnabledState _markdownEnabledState;
 	bool _undoAvailable = false;
 	bool _redoAvailable = false;
-	bool _inDrop = false;
+	bool _insertedTagsDelayClear = false;
 	bool _inHeightCheck = false;
 
 	bool _customUpDown = false;
@@ -603,8 +617,9 @@ private:
 	base::unique_qptr<PopupMenu> _contextMenu;
 
 	QTextCharFormat _defaultCharFormat;
-	QTextBlockFormat _defaultBlockFormat;
 
+	int _selectedActionQuoteId = 0;
+	int _pressedActionQuoteId = -1;
 	rpl::variable<int> _scrollTop;
 
 	InstantReplaces _mutableInstantReplaces;
@@ -626,7 +641,8 @@ private:
 
 void PrepareFormattingOptimization(not_null<QTextDocument*> document);
 
-[[nodiscard]] int FieldCharacterCount(not_null<InputField*> field);
+[[nodiscard]] int ComputeRealUnicodeCharactersCount(const QString &text);
+[[nodiscard]] int ComputeFieldCharacterCount(not_null<InputField*> field);
 
 void AddLengthLimitLabel(not_null<InputField*> field, int limit);
 

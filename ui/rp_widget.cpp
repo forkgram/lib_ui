@@ -6,58 +6,14 @@
 //
 #include "ui/rp_widget.h"
 
-#include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
-#include "ui/gl/gl_detection.h"
 
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
 #include <QtGui/QColorSpace>
-#include <private/qwidget_p.h>
-
-class TWidgetPrivate : public QWidgetPrivate {
-public:
-#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
-	TWidgetPrivate(int version = QObjectPrivateVersion)
-	: QWidgetPrivate(version) {
-		[[maybe_unused]] static const auto Once = [] {
-			if (::Platform::IsWayland()
-				&& Ui::GL::ChooseBackendDefault(
-						Ui::GL::CheckCapabilities(nullptr, true))
-					== Ui::GL::Backend::OpenGL) {
-				qApp->setProperty("_q_widgets_highdpi_downscale", true);
-				WaylandGL = true;
-			}
-			return true;
-		}();
-	}
-
-	QPlatformBackingStoreRhiConfig rhiConfig() const override {
-		const auto q = static_cast<TWidget*>(q_ptr);
-		if (!q->testAttribute(Qt::WA_WState_Created)
-			|| (!q->testAttribute(Qt::WA_NativeWindow)
-				&& !q->isWindow())) {
-			return QWidgetPrivate::rhiConfig();
-		}
-		if (const auto config = q->rhiConfig()) {
-			return *config;
-		}
-		// fix flickering on GNOME
-		if (WaylandGL) {
-			return { QPlatformBackingStoreRhiConfig::OpenGL };
-		}
-		return QWidgetPrivate::rhiConfig();
-	}
-#endif // Qt >= 6.4.0
-
-private:
-	static bool WaylandGL;
-};
-
-bool TWidgetPrivate::WaylandGL = false;
 
 TWidget::TWidget(QWidget *parent)
-: TWidgetHelper<QWidget>(*(new TWidgetPrivate), parent, {}) {
+: TWidgetHelper<QWidget>(parent) {
 	[[maybe_unused]] static const auto Once = [] {
 		auto format = QSurfaceFormat::defaultFormat();
 		format.setSwapInterval(0);
@@ -162,7 +118,8 @@ rpl::producer<int> RpWidgetWrap::desiredHeightValue() const {
 
 rpl::producer<bool> RpWidgetWrap::shownValue() const {
 	auto &stream = eventStreams().shown;
-	return stream.events_starting_with(!rpWidget()->isHidden());
+	return stream.events_starting_with(!rpWidget()->isHidden())
+		| rpl::distinct_until_changed();
 }
 
 rpl::producer<QRect> RpWidgetWrap::paintRequest() const {
@@ -214,6 +171,19 @@ bool RpWidgetWrap::handleEvent(QEvent *event) {
 		}
 	}
 	switch (event->type()) {
+	case QEvent::Show:
+	case QEvent::Hide:
+		if (rpWidget()->isWindow() && streams->shown.has_consumers()) {
+			if (!allAreObserved) {
+				that = rpWidget();
+			}
+			streams->shown.fire_copy(!rpWidget()->isHidden());
+			if (!that) {
+				return true;
+			}
+		}
+		break;
+
 	case QEvent::Move:
 	case QEvent::Resize:
 		if (streams->geometry.has_consumers()) {
