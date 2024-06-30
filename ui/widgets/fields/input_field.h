@@ -381,6 +381,7 @@ private:
 	};
 
 	void handleContentsChanged();
+	void updateRootFrameFormat();
 	bool viewportEventInner(QEvent *e);
 	void handleTouchEvent(QTouchEvent *e);
 
@@ -519,6 +520,7 @@ private:
 		int quoteId,
 		QStringView tag,
 		TextRange range);
+	void trippleEnterExitBlock(QTextCursor &cursor);
 
 	void touchUpdate(QPoint globalPosition);
 	void touchFinish();

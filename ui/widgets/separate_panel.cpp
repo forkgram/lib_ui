@@ -149,6 +149,14 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 	setWindowIcon(QGuiApplication::windowIcon());
 	initControls();
 	initLayout(args);
+
+	shownValue() | rpl::filter([=](bool shown) {
+		return shown;
+	}) | rpl::start_with_next([=] {
+		Platform::SetWindowMargins(this, _useTransparency
+			? _padding
+			: QMargins());
+	}, lifetime());
 }
 
 SeparatePanel::~SeparatePanel() = default;
@@ -676,12 +684,6 @@ void SeparatePanel::initGeometry(QSize size) {
 	}();
 	move(rect.topLeft());
 	setFixedSize(rect.size());
-	createWinId();
-	if (_useTransparency) {
-		Platform::SetWindowMargins(this, _padding);
-	} else {
-		Platform::UnsetWindowMargins(this);
-	}
 	updateControlsGeometry();
 }
 

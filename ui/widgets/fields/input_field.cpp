@@ -1179,10 +1179,11 @@ int ProcessInsertedTags(
 		not_null<QTextDocument*> document,
 		int changedPosition,
 		int changedEnd,
-		int applyNoTagFrom,
 		const TextWithTags::Tags &tags,
+		bool tagsReplaceExisting,
 		Fn<QString(QStringView)> processor) {
-	int firstTagStart = changedEnd;
+	auto firstTagStart = changedEnd;
+	auto applyNoTagFrom = tagsReplaceExisting ? changedPosition : changedEnd;
 	for (const auto &tag : tags) {
 		int tagFrom = changedPosition + tag.offset;
 		int tagTo = tagFrom + tag.length;
@@ -1206,6 +1207,13 @@ int ProcessInsertedTags(
 			c.setPosition(tagTo, QTextCursor::KeepAnchor);
 			if (const auto block = FindBlockTag(tag.id); !block.isEmpty()) {
 				c.setBlockFormat(PrepareBlockFormat(st, block));
+			} else if (tagsReplaceExisting) {
+				const auto block = c.block();
+				const auto blockStart = block.position();
+				if (blockStart >= changedPosition
+					&& blockStart + block.length() - 1 <= changedEnd) {
+					c.setBlockFormat(PrepareBlockFormat(st));
+				}
 			}
 			c.mergeCharFormat(PrepareTagFormat(st, tagId));
 			applyNoTagFrom = tagTo;
@@ -1543,8 +1551,7 @@ InputField::InputField(
 		}
 	}
 
-	if (_st.textBg->c.alphaF() >= 1.
-		&& !_st.borderRadius) {
+	if (_st.textBg->c.alphaF() >= 1. && !_st.borderRadius) {
 		setAttribute(Qt::WA_OpaquePaintEvent);
 	}
 
@@ -2540,6 +2547,37 @@ void InputField::editPreLanguage(int quoteId, QStringView tag) {
 	_editLanguageCallback(tag.mid(kTagPre.size()).toString(), apply);
 }
 
+void InputField::trippleEnterExitBlock(QTextCursor &cursor) {
+	const auto block = cursor.block();
+	if (!HasBlockTag(block)) {
+		return;
+	}
+	const auto document = cursor.document();
+	const auto position = cursor.position();
+	const auto blockFrom = block.position();
+	const auto blockTill = blockFrom + block.length();
+	if (blockTill - blockFrom <= 3
+		|| (position != blockFrom + 3 && position != blockTill - 1)) {
+		return;
+	} else if (document->characterAt(position - 1) != kSoftLine
+		|| document->characterAt(position - 2) != kSoftLine
+		|| document->characterAt(position - 3) != kSoftLine) {
+		return;
+	}
+	const auto before = (position == blockFrom + 3);
+	cursor.setPosition(position - 3, QTextCursor::KeepAnchor);
+	cursor.insertText(
+		QString(QChar(kHardLine)),
+		before ? cursor.charFormat() : _defaultCharFormat);
+	if (before) {
+		cursor.setPosition(cursor.position() - 1);
+	}
+	cursor.setBlockFormat(PrepareBlockFormat(_st));
+	if (before) {
+		setTextCursor(cursor);
+	}
+}
+
 void InputField::toggleBlockquoteCollapsed(
 		int quoteId,
 		QStringView tag,
@@ -2983,8 +3021,8 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 		document,
 		insertPosition,
 		insertEnd,
-		_insertedTagsReplace ? insertPosition : insertEnd,
 		_insertedTags,
+		_insertedTagsReplace,
 		insertedTagsProcessor);
 	using ActionType = FormattingAction::Type;
 	while (true) {
@@ -3445,21 +3483,7 @@ void InputField::documentContentsChanged(
 	if (document->isEmpty()) {
 		textCursor().setBlockFormat(PrepareBlockFormat(_st));
 	}
-	auto format = _inner->document()->rootFrame()->frameFormat();
-	const auto needsTopMargin = StartsWithPre(document);
-	const auto hasTopMargin = format.hasProperty(
-		QTextFrameFormat::FrameTopMargin);
-	if (needsTopMargin != hasTopMargin) {
-		const auto preTopMargin = _st.style.pre.padding.top()
-			+ _st.style.pre.header
-			+ _st.style.pre.verticalSkip;
-		format.setProperty(
-			QTextFrameFormat::FrameTopMargin,
-			(StartsWithPre(document)
-				? QVariant::fromValue(1. * preTopMargin)
-				: QVariant()));
-		_inner->document()->rootFrame()->setFrameFormat(format);
-	}
+	updateRootFrameFormat();
 	_correcting = false;
 	QTextCursor(document).endEditBlock();
 
@@ -3472,6 +3496,25 @@ void InputField::documentContentsChanged(
 	const auto added = charsAdded - _emojiSurrogateAmount;
 	_documentContentsChanges.fire({ position, charsRemoved, added });
 	_emojiSurrogateAmount = 0;
+}
+
+void InputField::updateRootFrameFormat() {
+	const auto document = _inner->document();
+	auto format = document->rootFrame()->frameFormat();
+	const auto propertyId = QTextFrameFormat::FrameTopMargin;
+	const auto needsTopMargin = StartsWithPre(document);
+	const auto hasTopMargin = format.hasProperty(propertyId)
+		&& (format.property(propertyId).toInt() > 0);
+	if (needsTopMargin != hasTopMargin) {
+		const auto preTopMargin = _st.style.pre.padding.top()
+			+ _st.style.pre.header
+			+ _st.style.pre.verticalSkip;
+		const auto value = needsTopMargin
+			? QVariant::fromValue(1. * preTopMargin)
+			: QVariant();
+		format.setProperty(propertyId, value);
+		document->rootFrame()->setFrameFormat(format);
+	}
 }
 
 void InputField::chopByMaxLength(int insertPosition, int insertLength) {
@@ -3981,6 +4024,7 @@ void InputField::keyPressEventInner(QKeyEvent *e) {
 				cursor.insertText(QString(QChar(kHardLine)));
 			} else {
 				cursor.insertText(QString(QChar(kSoftLine)));
+				trippleEnterExitBlock(cursor);
 			}
 			e->accept();
 		} else {
@@ -4658,7 +4702,7 @@ void InputField::finishMarkdownTagChange(
 	_insertedTags = textWithTags.tags;
 	_realInsertPosition = range.from;
 	_realCharsAdded = textWithTags.text.size();
-	cursor.insertText(textWithTags.text, _defaultCharFormat);
+	cursor.insertText(textWithTags.text);
 
 	cursor.setCharFormat(_defaultCharFormat);
 	cursor.endEditBlock();

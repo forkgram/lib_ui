@@ -8,11 +8,14 @@
 
 #include "base/flags.h"
 
+// ANGLE is used only on Windows with Qt < 6.
+#if defined Q_OS_WIN && QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#define DESKTOP_APP_USE_ANGLE
+#endif // Q_OS_WIN && Qt < 6
+
 class QOpenGLContext;
 
 namespace Ui::GL {
-
-extern const char kOptionAllowX11NvidiaOpenGL[];
 
 enum class Backend {
 	Raster,
@@ -33,7 +36,7 @@ void DetectLastCheckCrash();
 [[nodiscard]] bool LastCrashCheckFailed();
 void CrashCheckFinish();
 
-// Windows only.
+#ifdef DESKTOP_APP_USE_ANGLE
 enum class ANGLE {
 	Auto,
 	D3D9,
@@ -45,8 +48,6 @@ enum class ANGLE {
 void ConfigureANGLE(); // Requires Ui::Integration being set.
 void ChangeANGLE(ANGLE backend);
 [[nodiscard]] ANGLE CurrentANGLE();
-
-[[nodiscard]] QList<QByteArray> EGLExtensions(
-	not_null<QOpenGLContext*> context);
+#endif // DESKTOP_APP_USE_ANGLE
 
 } // namespace Ui::GL
