@@ -2127,6 +2127,12 @@ void InputField::paintQuotes(QPaintEvent *e) {
 	}
 }
 
+void InputField::setDocumentMargin(float64 margin) {
+	_settingDocumentMargin = true;
+	document()->setDocumentMargin(margin);
+	_settingDocumentMargin = false;
+}
+
 void InputField::setAdditionalMargin(int margin) {
 	setAdditionalMargins({ margin, margin, margin, margin });
 }
@@ -3502,16 +3508,16 @@ void InputField::updateRootFrameFormat() {
 	const auto document = _inner->document();
 	auto format = document->rootFrame()->frameFormat();
 	const auto propertyId = QTextFrameFormat::FrameTopMargin;
-	const auto needsTopMargin = StartsWithPre(document);
-	const auto hasTopMargin = format.hasProperty(propertyId)
-		&& (format.property(propertyId).toInt() > 0);
-	if (needsTopMargin != hasTopMargin) {
-		const auto preTopMargin = _st.style.pre.padding.top()
+	const auto topMargin = format.property(propertyId).toInt();
+	const auto wantedTopMargin = StartsWithPre(document)
+		? (_st.style.pre.padding.top()
 			+ _st.style.pre.header
-			+ _st.style.pre.verticalSkip;
-		const auto value = needsTopMargin
-			? QVariant::fromValue(1. * preTopMargin)
-			: QVariant();
+			+ _st.style.pre.verticalSkip)
+		: _requestedDocumentTopMargin;
+	if (_settingDocumentMargin) {
+		_requestedDocumentTopMargin = topMargin;
+	} else if (topMargin != wantedTopMargin) {
+		const auto value = QVariant::fromValue(1. * wantedTopMargin);
 		format.setProperty(propertyId, value);
 		document->rootFrame()->setFrameFormat(format);
 	}
@@ -5091,7 +5097,9 @@ void InputField::insertFromMimeDataInner(const QMimeData *source) {
 		const auto tagsMime = TextUtilities::TagsMimeType();
 		if (!source->hasFormat(textMime) || !source->hasFormat(tagsMime)) {
 			_insertedTags.clear();
-			return source->text();
+
+			auto result = source->text();
+			return result.replace(u"\r\n"_q, u"\n"_q);
 		}
 		auto result = QString::fromUtf8(source->data(textMime));
 		_insertedTags = TextUtilities::DeserializeTags(
