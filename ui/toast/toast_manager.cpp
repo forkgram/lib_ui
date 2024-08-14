@@ -26,7 +26,7 @@ bool Manager::eventFilter(QObject *o, QEvent *e) {
 	if (e->type() == QEvent::Resize) {
 		for (auto i = _toastByWidget.cbegin(), e = _toastByWidget.cend(); i != e; ++i) {
 			if (i->first->parentWidget() == o) {
-				i->first->onParentResized();
+				i->first->parentResized();
 			}
 		}
 	}
@@ -71,13 +71,14 @@ base::weak_ptr<Instance> Manager::addToast(
 			parent->installEventFilter(this);
 		}
 	}
-
-	const auto nearestHide = _toastByHideTime.empty()
-		? 0LL
-		: _toastByHideTime.begin()->first;
-	_toastByHideTime.emplace(t->_hideAt, t);
-	if (!nearestHide || _toastByHideTime.begin()->first < nearestHide) {
-		startNextHideTimer();
+	if (t->_hideAt > 0) {
+		const auto nearestHide = _toastByHideTime.empty()
+			? 0LL
+			: _toastByHideTime.begin()->first;
+		_toastByHideTime.emplace(t->_hideAt, t);
+		if (!nearestHide || _toastByHideTime.begin()->first < nearestHide) {
+			startNextHideTimer();
+		}
 	}
 	return make_weak(t);
 }
