@@ -7,8 +7,6 @@
 #pragma once
 
 #include "base/unique_qptr.h"
-#include "ui/rect_part.h"
-#include "ui/integration.h"
 
 #include <crl/crl.h>
 #include <QtCore/QEvent>
@@ -18,71 +16,16 @@ class QPixmap;
 class QImage;
 class QWheelEvent;
 
-enum class RectPart;
-using RectParts = base::flags<RectPart>;
-
 template <typename Object>
 class object_ptr;
 
 namespace Ui {
-namespace details {
-
-template <typename Value>
-class AttachmentOwner : public QObject {
-public:
-	template <typename ...Args>
-	AttachmentOwner(QObject *parent, Args &&...args)
-	: QObject(parent)
-	, _value(std::forward<Args>(args)...) {
-	}
-
-	not_null<Value*> value() {
-		return &_value;
-	}
-
-private:
-	Value _value;
-
-};
-
-} // namespace details
 
 template <typename Widget, typename ...Args>
 inline base::unique_qptr<Widget> CreateObject(Args &&...args) {
 	return base::make_unique_q<Widget>(
 		nullptr,
 		std::forward<Args>(args)...);
-}
-
-template <typename Value, typename Parent, typename ...Args>
-inline Value *CreateChild(
-		Parent parent,
-		Args &&...args) {
-	if constexpr (std::is_pointer_v<Parent>) {
-		Expects(parent != nullptr);
-
-		if constexpr (std::is_base_of_v<QObject, Value>) {
-			return new Value(parent, std::forward<Args>(args)...);
-		} else {
-			return CreateChild<details::AttachmentOwner<Value>>(
-				parent,
-				std::forward<Args>(args)...)->value();
-		}
-	} else if constexpr (requires(const Parent & t) { t.get(); }) {
-		return new Value(parent.get(), std::forward<Args>(args)...);
-	} else {
-		static_assert(requires(const Parent &t) { t.data(); });
-		return new Value(parent.data(), std::forward<Args>(args)...);
-	}
-}
-
-template <typename Value>
-inline not_null<details::AttachmentOwner<std::decay_t<Value>>*> WrapAsQObject(
-		not_null<QObject*> parent,
-		Value &&value) {
-	return CreateChild<details::AttachmentOwner<std::decay_t<Value>>>(
-		parent.get(),
-		std::forward<Value>(value));
 }
 
 inline void DestroyChild(QWidget *child) {
@@ -102,17 +45,7 @@ inline not_null<std::decay_t<Value>*> AttachAsChild(
 }
 
 [[nodiscard]] bool AppInFocus();
-
-[[nodiscard]] inline bool InFocusChain(not_null<const QWidget*> widget) {
-	if (const auto top = widget->window()) {
-		if (auto focused = top->focusWidget()) {
-			return !widget->isHidden()
-				&& (focused == widget
-					|| widget->isAncestorOf(focused));
-		}
-	}
-	return false;
-}
+[[nodiscard]] bool InFocusChain(not_null<const QWidget*> widget);
 
 template <typename ChildWidget>
 inline ChildWidget *AttachParentChild(
@@ -176,31 +109,11 @@ inline void SendSynteticMouseEvent(
 	return SendSynteticMouseEvent(widget, type, button, QCursor::pos());
 }
 
-template <typename Widget>
-QPointer<Widget> MakeWeak(Widget *object) {
-	return QPointer<Widget>(object);
-}
-
-template <typename Widget>
-QPointer<const Widget> MakeWeak(const Widget *object) {
-	return QPointer<const Widget>(object);
-}
-
-template <typename Widget>
-QPointer<Widget> MakeWeak(not_null<Widget*> object) {
-	return QPointer<Widget>(object.get());
-}
-
-template <typename Widget>
-QPointer<const Widget> MakeWeak(not_null<const Widget*> object) {
-	return QPointer<const Widget>(object.get());
-}
-
 [[nodiscard]] QPixmap PixmapFromImage(QImage &&image);
 
 [[nodiscard]] bool IsContentVisible(
-    not_null<QWidget*> widget,
-    const QRect &rect = QRect());
+	not_null<QWidget*> widget,
+	const QRect &rect = QRect());
 
 int WheelDirection(not_null<QWheelEvent*> e);
 

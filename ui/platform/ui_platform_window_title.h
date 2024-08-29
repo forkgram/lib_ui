@@ -169,7 +169,7 @@ namespace internal {
 // Actual requestor, cached by the public interface
 [[nodiscard]] TitleControls::Layout TitleControlsLayout();
 void NotifyTitleControlsLayoutChanged(
-    const std::optional<TitleControls::Layout> &layout = std::nullopt);
+	const std::optional<TitleControls::Layout> &layout = std::nullopt);
 
 } // namespace internal
 

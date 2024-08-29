@@ -8,7 +8,6 @@
 
 #include "base/unique_qptr.h"
 #include "ui/style/style_core_direction.h"
-#include "ui/ui_utility.h"
 
 #include <rpl/event_stream.h>
 #include <rpl/map.h>
@@ -283,6 +282,7 @@ public:
 	rpl::producer<> alive() const;
 	rpl::producer<> death() const;
 	rpl::producer<> macWindowDeactivateEvents() const;
+	rpl::producer<WId> winIdValue() const;
 
 	template <typename Error, typename Generator>
 	void showOn(rpl::producer<bool, Error, Generator> &&shown) {
@@ -312,6 +312,7 @@ private:
 		rpl::event_stream<bool> shown;
 		rpl::event_stream<not_null<QScreen*>> screen;
 		rpl::event_stream<bool> windowActive;
+		rpl::event_stream<WId> winId;
 		rpl::event_stream<> alive;
 	};
 	struct Initer {

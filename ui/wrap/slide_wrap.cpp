@@ -6,6 +6,8 @@
 //
 #include "ui/wrap/slide_wrap.h"
 
+#include "ui/qt_weak_factory.h"
+#include "ui/ui_utility.h"
 #include "styles/style_basic.h"
 
 #include <rpl/combine.h>

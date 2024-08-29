@@ -128,6 +128,8 @@ PRIVATE
     ui/platform/win/ui_window_win.h
     ui/platform/win/ui_windows_direct_manipulation.cpp
     ui/platform/win/ui_windows_direct_manipulation.h
+    ui/platform/win/ui_windows_native_event_filter.cpp
+    ui/platform/win/ui_windows_native_event_filter.h
     ui/platform/win/ui_utility_win.cpp
     ui/platform/win/ui_utility_win.h
     ui/platform/ui_platform_window_title.cpp
@@ -157,8 +159,11 @@ PRIVATE
     ui/text/custom_emoji_instance.h
     ui/text/text.cpp
     ui/text/text.h
+    ui/text/text_bidi_algorithm.h
     ui/text/text_block.cpp
     ui/text/text_block.h
+    ui/text/text_block_parser.cpp
+    ui/text/text_block_parser.h
     ui/text/text_custom_emoji.cpp
     ui/text/text_custom_emoji.h
     ui/text/text_entity.cpp
@@ -166,14 +171,17 @@ PRIVATE
     ui/text/text_extended_data.cpp
     ui/text/text_extended_data.h
     ui/text/text_isolated_emoji.h
-    ui/text/text_parser.cpp
-    ui/text/text_parser.h
     ui/text/text_renderer.cpp
     ui/text/text_renderer.h
+    ui/text/text_stack_engine.cpp
+    ui/text/text_stack_engine.h
     ui/text/text_utilities.cpp
     ui/text/text_utilities.h
     ui/text/text_variant.cpp
     ui/text/text_variant.h
+    ui/text/text_word.h
+    ui/text/text_word_parser.cpp
+    ui/text/text_word_parser.h
     ui/toast/toast.cpp
     ui/toast/toast.h
     ui/toast/toast_manager.cpp
@@ -287,6 +295,8 @@ PRIVATE
     ui/painter.h
     ui/ph.cpp
     ui/ph.h
+    ui/qt_object_factory.h
+    ui/qt_weak_factory.h
     ui/rect.h
     ui/rect_part.h
     ui/round_rect.cpp

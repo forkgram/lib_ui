@@ -10,6 +10,8 @@
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/qt_object_factory.h"
+#include "ui/qt_weak_factory.h"
 #include "styles/style_widgets.h"
 
 namespace Ui::Menu {
