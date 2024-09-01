@@ -232,6 +232,8 @@ void Renderer::enumerate() {
 			_lineStartPadding = _last_rPadding;
 
 			longWordLine = true;
+			lastWordStart = w + 1;
+			lastWordStart_wLeft = _wLeft;
 			continue;
 		} else if (!_quoteLinesLeft) {
 			continue;
@@ -243,7 +245,8 @@ void Renderer::enumerate() {
 		const auto newWidthLeft = _wLeft
 			- last_rBearing
 			- (_last_rPadding + w__f_width - w__f_rbearing);
-		if (newWidthLeft >= 0) {
+		if (newWidthLeft >= 0
+			|| (w->position() == _lineStart && !_elidedLine)) {
 			last_rBearing = w__f_rbearing;
 			_last_rPadding = w->f_rpadding();
 			_wLeft = newWidthLeft;
@@ -1271,7 +1274,8 @@ const AbstractBlock *Renderer::markBlockForElisionGetEnd(int blockIndex) {
 		: nullptr;
 }
 
-void Renderer::setElideBidi(int elideStart, int elideLength) {
+void Renderer::setElideBidi(int elideStart) {
+	const auto elideLength = kQEllipsis.size();
 	const auto newParLength = elideStart + elideLength - _paragraphStart;
 	if (newParLength > _paragraphAnalysis.size()) {
 		_paragraphAnalysis.resize(newParLength);
@@ -1329,10 +1333,7 @@ void Renderer::prepareElidedLine(
 			|| _type == TextBlockType::Newline) {
 			if (_wLeft < elisionWidth + si.width) {
 				_wLeft -= elisionWidth;
-				lineText = lineText.mid(0, block->position() - _localFrom) + kQEllipsis;
-				lineLength = block->position() + kQEllipsis.size() - _lineStart;
-				_selection.to = qMin(_selection.to, block->position());
-				setElideBidi(block->position(), kQEllipsis.size());
+				prepareElisionAt(lineText, lineLength, block->position());
 				endBlock = markBlockForElisionGetEnd(blockIndex);
 				return;
 			}
@@ -1363,18 +1364,15 @@ void Renderer::prepareElidedLine(
 					}
 
 					if (lineText.size() <= pos || recursed > 3) {
-						lineText += kQEllipsis;
-						lineLength = _localFrom + pos + kQEllipsis.size() - _lineStart;
-						_selection.to = qMin(_selection.to, uint16(_localFrom + pos));
-						setElideBidi(_localFrom + pos, kQEllipsis.size());
+						prepareElisionAt(lineText, lineLength, _localFrom + pos);
 						endBlock = markBlockForElisionGetEnd(blockIndex);
-					} else {
-						lineText = lineText.mid(0, pos);
-						lineLength = _localFrom + pos - _lineStart;
-						_blocksSize = blockIndex + 1;
-						endBlock = nextBlock;
-						prepareElidedLine(lineText, lineStart, lineLength, endBlock, recursed + 1);
+						return;
 					}
+					lineText = lineText.mid(0, pos);
+					lineLength = _localFrom + pos - _lineStart;
+					_blocksSize = blockIndex + 1;
+					endBlock = nextBlock;
+					prepareElidedLine(lineText, lineStart, lineLength, endBlock, recursed + 1);
 					return;
 				} else {
 					_wLeft -= adv;
@@ -1386,21 +1384,25 @@ void Renderer::prepareElidedLine(
 	_wLeft -= elisionWidth;
 
 	const auto elideStart = _localFrom + lineText.size();
-	_selection.to = qMin(_selection.to, uint16(elideStart));
-	setElideBidi(elideStart, kQEllipsis.size());
-
 	auto blockIndex = engine.blockIndex(lineText.size() - 1);
 	for (; blockIndex + 1 < _blocksSize && _t->_blocks[blockIndex]->position() < elideStart; ++blockIndex) {
 	}
-
-	lineText += kQEllipsis;
-	lineLength += kQEllipsis.size();
-
+	prepareElisionAt(lineText, lineLength, elideStart);
 	if (recursed) {
 		_indexOfElidedBlock = blockIndex;
 	} else {
 		endBlock = markBlockForElisionGetEnd(blockIndex);
 	}
+}
+
+void Renderer::prepareElisionAt(
+		QString &lineText,
+		int &lineLength,
+		uint16 position) {
+	lineText = lineText.mid(0, position - _localFrom) + kQEllipsis;
+	lineLength = position + kQEllipsis.size() - _lineStart;
+	_selection.to = qMin(_selection.to, position);
+	setElideBidi(position);
 }
 
 void Renderer::restoreAfterElided() {
