@@ -5252,7 +5252,8 @@ int ComputeFieldCharacterCount(not_null<InputField*> field) {
 void AddLengthLimitLabel(
 		not_null<InputField*> field,
 		int limit,
-		std::optional<uint> customThreshold) {
+		std::optional<uint> customThreshold,
+		int limitLabelTop) {
 	struct State {
 		rpl::variable<int> length;
 	};
@@ -5302,7 +5303,7 @@ void AddLengthLimitLabel(
 		const auto top = field->st().textMargins.top()
 			+ field->st().style.font->ascent
 			- st::defaultInputFieldLimit.style.font->ascent;
-		warning->moveToRight(0, top);
+		warning->moveToRight(0, top + limitLabelTop);
 	}, warning->lifetime());
 	warning->setAttribute(Qt::WA_TransparentForMouseEvents);
 }
