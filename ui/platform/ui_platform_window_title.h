@@ -123,7 +123,7 @@ public:
 	void setResizeEnabled(bool enabled);
 	void raise();
 
-	[[nodiscard]] HitTestResult hitTest(QPoint point, int padding) const;
+	[[nodiscard]] HitTestResult hitTest(QPoint point) const;
 
 	void buttonOver(HitTestResult testResult);
 	void buttonDown(HitTestResult testResult);
@@ -142,9 +142,6 @@ private:
 	void init(Fn<void(bool maximized)> maximize);
 	void updateButtonsState();
 	void updateControlsPosition();
-	void updateControlsPositionBySide(
-		const std::vector<Control> &controls,
-		bool right);
 	void handleWindowStateChanged(Qt::WindowStates state = Qt::WindowNoState);
 
 	not_null<const style::WindowTitle*> _st;

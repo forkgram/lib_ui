@@ -24,19 +24,6 @@
 
 namespace Ui {
 namespace Platform {
-namespace {
-
-template <typename T>
-void RemoveDuplicates(std::vector<T> &v) {
-	auto end = v.end();
-	for (auto it = v.begin(); it != end; ++it) {
-		end = std::remove(it + 1, end, *it);
-	}
-
-	v.erase(end, v.end());
-}
-
-} // namespace
 
 bool SemiNativeSystemButtonProcessing() {
 	return ::Platform::IsWindows11OrGreater();
@@ -303,10 +290,11 @@ void TitleControls::raise() {
 	}
 }
 
-HitTestResult TitleControls::hitTest(QPoint point, int padding) const {
+HitTestResult TitleControls::hitTest(QPoint point) const {
 	const auto test = [&](const object_ptr<AbstractButton> &button) {
-		return button && button->geometry().marginsAdded(
-			{ 0, padding, 0, 0 }
+		return button && QRect(
+			button->mapTo(button->window(), QPoint()),
+			button->size()
 		).contains(point);
 	};
 	if (test(_minimize)) {
@@ -372,18 +360,22 @@ void TitleControls::updateControlsPosition() {
 	auto controlsLayout = TitleControlsLayout();
 	auto &controlsLeft = controlsLayout.left;
 	auto &controlsRight = controlsLayout.right;
-	const auto moveFromTo = [&](auto &from, auto &to) {
-		for (const auto control : from) {
-			if (!ranges::contains(to, control)) {
-				to.push_back(control);
+	ranges::reverse(controlsRight);
+
+	if (_st->oneSideControls) {
+		const auto moveFromTo = [&](auto &from, auto &to) {
+			for (const auto control : from) {
+				if (!ranges::contains(to, control)) {
+					to.push_back(control);
+				}
 			}
+			from.clear();
+		};
+		if (TitleControlsOnLeft(controlsLayout)) {
+			moveFromTo(controlsRight, controlsLeft);
+		} else {
+			moveFromTo(controlsLeft, controlsRight);
 		}
-		from.clear();
-	};
-	if (TitleControlsOnLeft(controlsLayout)) {
-		moveFromTo(controlsRight, controlsLeft);
-	} else {
-		moveFromTo(controlsLeft, controlsRight);
 	}
 
 	const auto controlPresent = [&](Control control) {
@@ -433,34 +425,30 @@ void TitleControls::updateControlsPosition() {
 		_top->hide();
 	}
 
-	updateControlsPositionBySide(controlsLeft, false);
-	updateControlsPositionBySide(controlsRight, true);
-}
+	std::vector<Control> visitedControls;
+	const auto updateBySide = [&](
+			const std::vector<Control> &controls,
+			bool right) {
+		auto position = 0;
+		for (const auto &control : controls) {
+			const auto widget = controlWidget(control);
+			if (!widget || ranges::contains(visitedControls, control)) {
+				continue;
+			}
 
-void TitleControls::updateControlsPositionBySide(
-		const std::vector<Control> &controls,
-		bool right) {
-	auto preparedControls = right
-		? (ranges::views::reverse(controls) | ranges::to_vector)
-		: controls;
+			if (right) {
+				widget->moveToRight(position, 0);
+			} else {
+				widget->moveToLeft(position, 0);
+			}
 
-	RemoveDuplicates(preparedControls);
-
-	auto position = 0;
-	for (const auto &control : preparedControls) {
-		const auto widget = controlWidget(control);
-		if (!widget) {
-			continue;
+			position += widget->width();
+			visitedControls.push_back(control);
 		}
+	};
 
-		if (right) {
-			widget->moveToRight(position, 0);
-		} else {
-			widget->moveToLeft(position, 0);
-		}
-
-		position += widget->width();
-	}
+	updateBySide(controlsLeft, false);
+	updateBySide(controlsRight, true);
 }
 
 void TitleControls::handleWindowStateChanged(Qt::WindowStates state) {
@@ -633,10 +621,7 @@ std::unique_ptr<SeparateTitleControls> SetupSeparateTitleControls(
 
 	window->hitTestRequests(
 	) | rpl::start_with_next([=](not_null<HitTestRequest*> request) {
-		const auto origin = raw->wrap.pos();
-		const auto relative = request->point - origin;
-		const auto padding = window->additionalContentPadding();
-		const auto controlsResult = raw->controls.hitTest(relative, padding);
+		const auto controlsResult = raw->controls.hitTest(request->point);
 		if (controlsResult != HitTestResult::None) {
 			request->result = controlsResult;
 		}
