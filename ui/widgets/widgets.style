@@ -648,6 +648,9 @@ defaultFlatLabel: FlatLabel {
 	style: defaultTextStyle;
 	palette: defaultTextPalette;
 }
+defaultSubTextLabel: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+}
 
 defaultLinkButton: LinkButton {
 	color: windowActiveTextFg;
@@ -672,6 +675,10 @@ defaultTable: Table {
 }
 
 emptyRippleAnimation: RippleAnimation {
+}
+
+defaultRippleAnimationBgOver: RippleAnimation(defaultRippleAnimation) {
+	color: windowBgOver;
 }
 
 buttonRadius: 4px;
@@ -926,9 +933,7 @@ defaultInputField: InputField {
 	heightMax: 148px;
 	widthMin: 64px;
 }
-defaultInputFieldLimit: FlatLabel(defaultFlatLabel) {
-	textFg: windowSubTextFg;
-}
+defaultInputFieldLimit: defaultSubTextLabel;
 
 defaultIconButton: IconButton {
 	iconPosition: point(-1px, -1px);
@@ -991,9 +996,7 @@ defaultMultiSelectSearchCancel: CrossButton {
 
 	duration: 150;
 	loadingPeriod: 1000;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 defaultMultiSelect: MultiSelect {
 	bg: boxSearchBg;
@@ -1340,9 +1343,7 @@ menuToggle: IconButton {
 
 	rippleAreaPosition: point(0px, 0px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 
 backButtonIcon: icon {{ "box_button_back", menuIconFg }};
@@ -1356,9 +1357,7 @@ backButton: IconButton(defaultIconButton) {
 
 	rippleAreaPosition: point(0px, 0px);
 	rippleAreaSize: 40px;
-	ripple: RippleAnimation(defaultRippleAnimation) {
-		color: windowBgOver;
-	}
+	ripple: defaultRippleAnimationBgOver;
 }
 
 defaultSettingsToggle: Toggle(defaultToggle) {
