@@ -62,6 +62,9 @@ public:
 	void setInnerSize(QSize size, bool allowResize = false);
 	[[nodiscard]] QRect innerGeometry() const;
 
+	void toggleFullScreen(bool fullscreen);
+	[[nodiscard]] QMargins computePadding() const;
+
 	void setHideOnDeactivate(bool hideOnDeactivate);
 	void showAndActivate();
 	int hideGetDuration();
@@ -119,6 +122,7 @@ protected:
 
 private:
 	class ResizeEdge;
+	class FullScreenButton;
 
 	void initControls();
 	void initLayout(const SeparatePanelArgs &args);
@@ -165,6 +169,11 @@ private:
 	base::unique_qptr<LayerStackWidget> _layer = { nullptr };
 	base::unique_qptr<PopupMenu> _menu;
 	std::vector<std::unique_ptr<ResizeEdge>> _resizeEdges;
+
+	std::unique_ptr<FullScreenButton> _fsClose;
+	std::unique_ptr<FullScreenButton> _fsMenuToggle;
+	std::unique_ptr<FadeWrapScaled<FullScreenButton>> _fsBack;
+
 	rpl::event_stream<> _synteticBackRequests;
 	rpl::event_stream<> _userCloseRequests;
 	rpl::event_stream<> _closeEvents;
@@ -182,6 +191,7 @@ private:
 
 	Animations::Simple _titleLeft;
 	bool _visible = false;
+	rpl::variable<bool> _fullscreen = false;
 
 	Animations::Simple _opacityAnimation;
 	QPixmap _animationCache;
