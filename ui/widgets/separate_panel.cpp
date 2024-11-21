@@ -18,6 +18,7 @@
 #include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/platform/ui_platform_utility.h"
+#include "ui/platform/ui_platform_window.h"
 #include "ui/layers/box_content.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/layers/show.h"
@@ -190,27 +191,6 @@ SeparatePanel::FullScreenButton::FullScreenButton(
 : RippleButton(parent, st.ripple)
 , _st(st) {
 	resize(_st.width, _st.height);
-}
-
-void InitFullScreenButton(
-		not_null<QWidget*> button,
-		not_null<QWidget*> parentWindow) {
-	button->setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint)
-		| Qt::BypassWindowManagerHint
-		| Qt::NoDropShadowWindowHint
-		| Qt::Tool);
-	button->setAttribute(Qt::WA_MacAlwaysShowToolWindow);
-	button->setAttribute(Qt::WA_OpaquePaintEvent, false);
-	button->setAttribute(Qt::WA_TranslucentBackground, true);
-	button->setAttribute(Qt::WA_NoSystemBackground, true);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	button->setScreen(parentWindow->screen());
-#else // Qt >= 6.0.0
-	button->createWinId();
-	button->windowHandle()->setScreen(
-		parentWindow->windowHandle()->screen());
-#endif
-	button->show();
 }
 
 void SeparatePanel::FullScreenButton::paintEvent(QPaintEvent *e) {
@@ -413,12 +393,20 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 	) | rpl::filter([=](bool shown, bool) {
 		return shown;
 	}) | rpl::start_with_next([=](bool, bool fullscreen) {
-		if (_title) {
-			_title->setVisible(!fullscreen);
-		}
+		updateControlsVisibility(fullscreen);
 		Platform::SetWindowMargins(
 			this,
 			_useTransparency ? computePadding() : QMargins());
+	}, lifetime());
+
+	Platform::FullScreenEvents(
+		this
+	) | rpl::start_with_next([=](Platform::FullScreenEvent event) {
+		if (event == Platform::FullScreenEvent::DidEnter) {
+			createFullScreenButtons();
+		} else if (event == Platform::FullScreenEvent::WillExit) {
+			_fullscreen = false;
+		}
 	}, lifetime());
 }
 
@@ -446,61 +434,29 @@ void SeparatePanel::setTitleBadge(object_ptr<RpWidget> badge) {
 }
 
 void SeparatePanel::initControls() {
+	_back->toggledValue(
+	) | rpl::start_with_next([=](bool toggled) {
+		_titleLeft.start(
+			[=] { updateTitleGeometry(width()); },
+			toggled ? 0. : 1.,
+			toggled ? 1. : 0.,
+			st::fadeWrapDuration);
+	}, _back->lifetime());
+	_back->hide(anim::type::instant);
+	if (_fsBack) {
+		_fsBack->hide(anim::type::instant);
+	}
+	_titleLeft.stop();
+
 	_fullscreen.value(
 	) | rpl::start_with_next([=](bool fullscreen) {
 		if (!fullscreen) {
 			_fsClose = nullptr;
 			_fsMenuToggle = nullptr;
 			_fsBack = nullptr;
-			return;
-		} else if (_fsClose) {
-			return;
+		} else if (!_fsClose) {
+			createFullScreenButtons();
 		}
-		_fsClose = std::make_unique<FullScreenButton>(
-			this,
-			st::fullScreenPanelClose);
-		InitFullScreenButton(_fsClose.get(), this);
-		_fsClose->clicks() | rpl::to_empty | rpl::start_to_stream(
-			_userCloseRequests,
-			_fsClose->lifetime());
-
-		_fsBack = std::make_unique<FadeWrapScaled<FullScreenButton>>(
-			this,
-			object_ptr<FullScreenButton>(this, st::fullScreenPanelBack));
-		InitFullScreenButton(_fsBack.get(), this);
-		_fsBack->toggle(_back->toggled(), anim::type::instant);
-		if (_back->toggled()) {
-			_fsBack->raise();
-		}
-		_fsBack->entity()->clicks() | rpl::to_empty | rpl::start_to_stream(
-			_synteticBackRequests,
-			_fsBack->lifetime());
-		if (_menuToggle) {
-			_fsMenuToggle = std::make_unique<FullScreenButton>(
-				this,
-				st::fullScreenPanelMenu);
-			InitFullScreenButton(_fsMenuToggle.get(), this);
-			if (const auto onstack = _menuToggleCreated) {
-				onstack(_fsMenuToggle.get(), true);
-			}
-			_fsMenuToggle->setClickedCallback([=] {
-				_menuToggle->clicked(
-					_fsMenuToggle->clickModifiers(),
-					Qt::LeftButton);
-			});
-		}
-		geometryValue() | rpl::start_with_next([=](QRect geometry) {
-			const auto shift = st::separatePanelClose.rippleAreaPosition;
-			_fsBack->move(geometry.topLeft() + shift);
-			_fsBack->resize(st::fullScreenPanelBack.width, st::fullScreenPanelBack.height);
-			_fsClose->move(geometry.topLeft() + QPoint(geometry.width() - _fsClose->width() - shift.x(), shift.y()));
-			_fsClose->resize(st::fullScreenPanelClose.width, st::fullScreenPanelClose.height);
-			if (_fsMenuToggle) {
-				_fsMenuToggle->move(_fsClose->pos()
-					- QPoint(_fsMenuToggle->width() + shift.x(), 0));
-				_fsMenuToggle->resize(st::fullScreenPanelMenu.width, st::fullScreenPanelMenu.height);
-			}
-		}, _fsClose->lifetime());
 	}, lifetime());
 
 	rpl::combine(
@@ -513,19 +469,83 @@ void SeparatePanel::initControls() {
 		updateTitleGeometry(width);
 	}, lifetime());
 
-	_back->toggledValue(
-	) | rpl::start_with_next([=](bool toggled) {
-		_titleLeft.start(
-			[=] { updateTitleGeometry(width()); },
-			toggled ? 0. : 1.,
-			toggled ? 1. : 0.,
-			st::fadeWrapDuration);
-	}, _back->lifetime());
-	_back->hide(anim::type::instant);
-	_titleLeft.stop();
-
 	_back->raise();
 	_close->raise();
+}
+
+void SeparatePanel::createFullScreenButtons() {
+	_fsClose = std::make_unique<FullScreenButton>(
+		this,
+		st::fullScreenPanelClose);
+	initFullScreenButton(_fsClose.get());
+	_fsClose->clicks() | rpl::to_empty | rpl::start_to_stream(
+		_userCloseRequests,
+		_fsClose->lifetime());
+
+	_fsBack = std::make_unique<FadeWrapScaled<FullScreenButton>>(
+		this,
+		object_ptr<FullScreenButton>(this, st::fullScreenPanelBack));
+	initFullScreenButton(_fsBack.get());
+	_fsBack->toggle(_back->toggled(), anim::type::instant);
+	if (_back->toggled()) {
+		_fsBack->raise();
+	}
+	_fsBack->entity()->clicks() | rpl::to_empty | rpl::start_to_stream(
+		_synteticBackRequests,
+		_fsBack->lifetime());
+	if (_menuToggle) {
+		_fsMenuToggle = std::make_unique<FullScreenButton>(
+			this,
+			st::fullScreenPanelMenu);
+		initFullScreenButton(_fsMenuToggle.get());
+		if (const auto onstack = _menuToggleCreated) {
+			onstack(_fsMenuToggle.get(), true);
+		}
+		_fsMenuToggle->setClickedCallback([=] {
+			_menuToggle->clicked(
+				_fsMenuToggle->clickModifiers(),
+				Qt::LeftButton);
+		});
+	} else {
+		_fsMenuToggle = nullptr;
+	}
+	geometryValue() | rpl::start_with_next([=](QRect geometry) {
+		if (_fsAllowChildControls) {
+			geometry = QRect(QPoint(), size());
+		}
+		const auto shift = st::separatePanelClose.rippleAreaPosition;
+		_fsBack->move(geometry.topLeft() + shift);
+		_fsBack->resize(st::fullScreenPanelBack.width, st::fullScreenPanelBack.height);
+		_fsClose->move(geometry.topLeft() + QPoint(geometry.width() - _fsClose->width() - shift.x(), shift.y()));
+		_fsClose->resize(st::fullScreenPanelClose.width, st::fullScreenPanelClose.height);
+		if (_fsMenuToggle) {
+			_fsMenuToggle->move(_fsClose->pos()
+				- QPoint(_fsMenuToggle->width() + shift.x(), 0));
+			_fsMenuToggle->resize(st::fullScreenPanelMenu.width, st::fullScreenPanelMenu.height);
+		}
+	}, _fsClose->lifetime());
+}
+
+void SeparatePanel::initFullScreenButton(not_null<QWidget*> button) {
+	if (_fsAllowChildControls) {
+		button->show();
+		return;
+	}
+	button->setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint)
+		| Qt::BypassWindowManagerHint
+		| Qt::NoDropShadowWindowHint
+		| Qt::Tool);
+	button->setAttribute(Qt::WA_MacAlwaysShowToolWindow);
+	button->setAttribute(Qt::WA_OpaquePaintEvent, false);
+	button->setAttribute(Qt::WA_TranslucentBackground, true);
+	button->setAttribute(Qt::WA_NoSystemBackground, true);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	button->setScreen(screen());
+#else // Qt >= 6.0.0
+	button->createWinId();
+	button->windowHandle()->setScreen(windowHandle()->screen());
+#endif
+	button->show();
 }
 
 void SeparatePanel::updateTitleButtonColors(not_null<IconButton*> button) {
@@ -720,6 +740,9 @@ void SeparatePanel::setMenuAllowed(
 			padding.top());
 	}, _menuToggle->lifetime());
 	updateTitleGeometry(width());
+	if (_fullscreen.current()) {
+		createFullScreenButtons();
+	}
 	_menuToggleCreated = std::move(created);
 	if (const auto onstack = _menuToggleCreated) {
 		onstack(_menuToggle.data(), false);
@@ -1037,8 +1060,27 @@ void SeparatePanel::finishAnimating() {
 
 void SeparatePanel::showControls() {
 	showChildren();
+	updateControlsVisibility(_fullscreen.current());
+}
+
+void SeparatePanel::updateControlsVisibility(bool fullscreen) {
+	if (_title) {
+		_title->setVisible(!fullscreen);
+	}
+	_close->setVisible(!fullscreen);
+	if (_menuToggle) {
+		_menuToggle->setVisible(!fullscreen);
+	}
+	if (fullscreen) {
+		_back->lower();
+	} else {
+		_back->raise();
+	}
 	if (!_back->toggled()) {
 		_back->setVisible(false);
+		if (_fsBack) {
+			_fsBack->setVisible(false);
+		}
 	}
 }
 
@@ -1223,6 +1265,20 @@ void SeparatePanel::toggleFullScreen(bool fullscreen) {
 	} else {
 		showNormal();
 	}
+}
+
+void SeparatePanel::allowChildFullScreenControls(bool allow) {
+	if (_fsAllowChildControls == allow) {
+		return;
+	}
+	_fsAllowChildControls = allow;
+	if (_fullscreen.current()) {
+		createFullScreenButtons();
+	}
+}
+
+rpl::producer<bool> SeparatePanel::fullScreenValue() const {
+	return _fullscreen.value();
 }
 
 QMargins SeparatePanel::computePadding() const {

@@ -972,4 +972,9 @@ bool NativeWindowFrameSupported() {
 	return true;
 }
 
+rpl::producer<FullScreenEvent> FullScreenEvents(
+		not_null<RpWidget*> window) {
+	return rpl::never<FullScreenEvent>();
+}
+
 } // namespace Ui::Platform
