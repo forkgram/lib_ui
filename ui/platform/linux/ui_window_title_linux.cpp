@@ -78,9 +78,11 @@ TitleControls::Layout TitleControlsLayoutImpl::Get() {
 				splitted[1].split(','),
 				ranges::back_inserter(result.right),
 				toControl);
-			result.right.insert(0, TitleControls::Control::OnTop);
+			result.right.insert(
+				begin(result.right),
+				TitleControls::Control::OnTop);
 		} else {
-			result.left.push_bask(TitleControls::Control::OnTop);
+			result.left.push_back(TitleControls::Control::OnTop);
 		}
 
 		return result;
