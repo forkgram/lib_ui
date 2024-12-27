@@ -16,80 +16,78 @@
 
 namespace Ui {
 namespace Platform {
-namespace internal {
 namespace {
 
-TitleControls::Control GtkKeywordToTitleControl(const QString &keyword) {
-	if (keyword == qstr("minimize")) {
-		return TitleControls::Control::Minimize;
-	} else if (keyword == qstr("maximize")) {
-		return TitleControls::Control::Maximize;
-	} else if (keyword == qstr("close")) {
-		return TitleControls::Control::Close;
-	}
+class TitleControlsLayoutImpl : public TitleControlsLayout {
+public:
+	TitleControlsLayoutImpl();
 
-	return TitleControls::Control::Unknown;
-}
+private:
+	[[nodiscard]] static TitleControls::Layout Get();
 
-TitleControls::Layout GtkKeywordsToTitleControlsLayout(
-		const QString &keywords) {
-	const auto splitted = keywords.split(':');
+	const rpl::lifetime _lifetime;
+	const base::Platform::XDP::SettingWatcher _settingWatcher;
+};
 
-	std::vector<TitleControls::Control> controlsLeft;
-	ranges::transform(
-		splitted[0].split(','),
-		ranges::back_inserter(controlsLeft),
-		GtkKeywordToTitleControl);
-
-	std::vector<TitleControls::Control> controlsRight;
-	controlsRight.push_back(TitleControls::Control::OnTop);
-	if (splitted.size() > 1) {
-		ranges::transform(
-			splitted[1].split(','),
-			ranges::back_inserter(controlsRight),
-			GtkKeywordToTitleControl);
-	}
-
-	return TitleControls::Layout{
-		.left = controlsLeft,
-		.right = controlsRight,
-	};
-}
-
-} // namespace
-
-TitleControls::Layout TitleControlsLayout() {
-	[[maybe_unused]] static const auto Inited = [] {
+TitleControlsLayoutImpl::TitleControlsLayoutImpl()
+: TitleControlsLayout(Get())
+, _lifetime([&] {
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
-		using base::Platform::XCB::XSettings;
-		if (const auto xSettings = XSettings::Instance()) {
-			static const auto lifetime
-				= xSettings->registerCallbackForProperty(
-					"Gtk/DecorationLayout",
-					[](
-							xcb_connection_t *,
-							const QByteArray &,
-							const QVariant &) {
-						NotifyTitleControlsLayoutChanged();
-					});
-		}
-#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
-
-		namespace XDP = base::Platform::XDP;
-		static const XDP::SettingWatcher settingWatcher(
-			"org.gnome.desktop.wm.preferences",
-			"button-layout",
-			[] {
-				base::Integration::Instance().enterFromEventLoop([] {
-					NotifyTitleControlsLayoutChanged();
+	using base::Platform::XCB::XSettings;
+	if (const auto xSettings = XSettings::Instance()) {
+		return xSettings->registerCallbackForProperty(
+			"Gtk/DecorationLayout",
+			[=](xcb_connection_t *, const QByteArray &, const QVariant &) {
+				base::Integration::Instance().enterFromEventLoop([&] {
+					_variable = Get();
 				});
 			});
+	}
+#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
+	return rpl::lifetime();
+}())
+, _settingWatcher("org.gnome.desktop.wm.preferences", "button-layout", [=] {
+	base::Integration::Instance().enterFromEventLoop([&] {
+		_variable = Get();
+	});
+}) {}
 
-		return true;
-	}();
+TitleControls::Layout TitleControlsLayoutImpl::Get() {
+	const auto convert = [](const QString &keywords) {
+		const auto toControl = [](const QString &keyword) {
+			if (keyword == qstr("minimize")) {
+				return TitleControls::Control::Minimize;
+			} else if (keyword == qstr("maximize")) {
+				return TitleControls::Control::Maximize;
+			} else if (keyword == qstr("close")) {
+				return TitleControls::Control::Close;
+			}
+			return TitleControls::Control::Unknown;
+		};
+
+		TitleControls::Layout result;
+		const auto splitted = keywords.split(':');
+
+		ranges::transform(
+			splitted[0].split(','),
+			ranges::back_inserter(result.left),
+			toControl);
+
+		if (splitted.size() > 1) {
+			ranges::transform(
+				splitted[1].split(','),
+				ranges::back_inserter(result.right),
+				toControl);
+			result.right.insert(0, TitleControls::Control::OnTop);
+		} else {
+			result.left.push_bask(TitleControls::Control::OnTop);
+		}
+
+		return result;
+	};
 
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
-	const auto xSettingsResult = []()
+	const auto xSettingsResult = [&]()
 	-> std::optional<TitleControls::Layout> {
 		using base::Platform::XCB::XSettings;
 		const auto xSettings = XSettings::Instance();
@@ -104,7 +102,7 @@ TitleControls::Layout TitleControlsLayout() {
 			return std::nullopt;
 		}
 
-		return GtkKeywordsToTitleControlsLayout(decorationLayout.toString());
+		return convert(decorationLayout.toString());
 	}();
 
 	if (xSettingsResult.has_value()) {
@@ -112,7 +110,7 @@ TitleControls::Layout TitleControlsLayout() {
 	}
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
-	const auto portalResult = []() -> std::optional<TitleControls::Layout> {
+	const auto portalResult = [&]() -> std::optional<TitleControls::Layout> {
 		auto decorationLayout = base::Platform::XDP::ReadSetting(
 			"org.gnome.desktop.wm.preferences",
 			"button-layout");
@@ -121,7 +119,7 @@ TitleControls::Layout TitleControlsLayout() {
 			return std::nullopt;
 		}
 
-		return GtkKeywordsToTitleControlsLayout(
+		return convert(
 			QString::fromStdString(decorationLayout->get_string(nullptr)));
 	}();
 
@@ -139,6 +137,11 @@ TitleControls::Layout TitleControlsLayout() {
 	};
 }
 
-} // namespace internal
+} // namespace
+
+std::shared_ptr<TitleControlsLayout> TitleControlsLayout::Create() {
+	return std::make_shared<TitleControlsLayoutImpl>();
+}
+
 } // namespace Platform
 } // namespace Ui
