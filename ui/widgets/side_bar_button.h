@@ -23,8 +23,10 @@ class SideBarButton final : public Ui::RippleButton {
 public:
 	SideBarButton(
 		not_null<QWidget*> parent,
-		const QString &title,
-		const style::SideBarButton &st);
+		const TextWithEntities &title,
+		const style::SideBarButton &st,
+		const Fn<std::any(Fn<void()>)> &makeContext = nullptr,
+		Fn<bool()> paused = nullptr);
 
 	void setActive(bool active);
 	void setBadge(const QString &badge, bool muted);
@@ -54,6 +56,9 @@ private:
 	int _iconCacheBadgeWidth = 0;
 	bool _active = false;
 	bool _badgeMuted = false;
+
+	Fn<bool()> _paused;
+	Fn<std::any(Fn<void()>)> _makeContext;
 
 	struct {
 		bool locked = false;

@@ -22,12 +22,20 @@ constexpr auto kPremiumLockedOpacity = 0.6;
 
 SideBarButton::SideBarButton(
 	not_null<QWidget*> parent,
-	const QString &title,
-	const style::SideBarButton &st)
+	const TextWithEntities &title,
+	const style::SideBarButton &st,
+	const Fn<std::any(Fn<void()>)> &makeContext,
+	Fn<bool()> paused)
 : RippleButton(parent, st.ripple)
 , _st(st)
-, _text(_st.minTextWidth) {
-	_text.setText(_st.style, title);
+, _text(_st.minTextWidth)
+, _paused(paused)
+, _makeContext(std::move(makeContext)) {
+	_text.setMarkedText(
+		_st.style,
+		title,
+		kMarkupTextOptions,
+		_makeContext ? _makeContext([=] { update(); }) : std::any());
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
 	style::PaletteChanged(
@@ -79,10 +87,20 @@ void SideBarButton::setLocked(bool locked) {
 	const auto count = std::ceil(st::sideBarButtonLockSize.width()
 		/ float(_st.style.font->width(charFiller)));
 	const auto filler = QString().fill(charFiller, count);
-	const auto result = _lock.locked
-		? (filler + _text.toString())
-		: _text.toString().mid(count);
-	_text.setText(_st.style, result);
+	auto result = TextWithEntities();
+	if (_lock.locked) {
+		result.append(filler);
+	}
+	const auto len = _text.length();
+	result.append(_text.toTextWithEntities({
+		ushort(_lock.locked ? 0 : count),
+		ushort(len),
+	}));
+	_text.setMarkedText(
+		_st.style,
+		result,
+		kMarkupTextOptions,
+		_makeContext ? _makeContext([=] { update(); }) : std::any());
 	update();
 }
 
@@ -126,13 +144,13 @@ void SideBarButton::paintEvent(QPaintEvent *e) {
 		icon.paint(p, x, y, width());
 	}
 	p.setPen(_active ? _st.textFgActive : _st.textFg);
-	_text.drawElided(
-		p,
-		_st.textSkip,
-		_st.textTop,
-		(width() - 2 * _st.textSkip),
-		kMaxLabelLines,
-		style::al_top);
+	_text.draw(p, {
+		.position = { _st.textSkip, _st.textTop },
+		.availableWidth = (width() - 2 * _st.textSkip),
+		.align = style::al_top,
+		.pausedEmoji = _paused && _paused(),
+		.elisionLines = kMaxLabelLines,
+	});
 
 	if (_iconCacheBadgeWidth) {
 		const auto desiredLeft = width() / 2 + _st.badgePosition.x();
