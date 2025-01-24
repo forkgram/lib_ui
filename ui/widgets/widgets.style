@@ -626,7 +626,6 @@ Toast {
 }
 
 Table {
-	bg: color;
 	headerBg: color;
 	borderFg: color;
 	border: pixels;
@@ -747,7 +746,6 @@ defaultTableSmallButton: RoundButton(defaultActiveButton) {
 	}
 }
 defaultTable: Table {
-	bg: windowBg;
 	headerBg: windowBgOver;
 	borderFg: inputBorderFg;
 	border: 1px;
