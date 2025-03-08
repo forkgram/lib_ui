@@ -6,11 +6,12 @@
 //
 #include "ui/widgets/buttons.h"
 
-#include "ui/widgets/checkbox.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/effects/cross_animation.h"
 #include "ui/effects/numbers_animation.h"
 #include "ui/image/image_prepare.h"
+#include "ui/text/text_utilities.h"
+#include "ui/widgets/checkbox.h"
 #include "ui/painter.h"
 #include "ui/qt_object_factory.h"
 
@@ -298,12 +299,12 @@ RoundButton::RoundButton(
 	rpl::producer<QString> text,
 	const style::RoundButton &st)
 : RippleButton(parent, st.ripple)
-, _textFull(std::move(text))
+, _textFull(std::move(text) | rpl::map(Text::WithEntities))
 , _st(st)
 , _roundRect(st.radius ? st.radius : st::buttonRadius, _st.textBg)
 , _roundRectOver(st.radius ? st.radius : st::buttonRadius, _st.textBgOver) {
 	_textFull.value(
-	) | rpl::start_with_next([=](const QString &text) {
+	) | rpl::start_with_next([=](const TextWithEntities &text) {
 		resizeToText(text);
 	}, lifetime());
 }
@@ -314,6 +315,10 @@ void RoundButton::setTextTransform(TextTransform transform) {
 }
 
 void RoundButton::setText(rpl::producer<QString> text) {
+	_textFull = std::move(text) | rpl::map(Text::WithEntities);
+}
+
+void RoundButton::setText(rpl::producer<TextWithEntities> text) {
 	_textFull = std::move(text);
 }
 
@@ -372,10 +377,15 @@ void RoundButton::setFullRadius(bool enabled) {
 	update();
 }
 
-void RoundButton::resizeToText(const QString &text) {
-	_text.setText(
-		_st.style,
-		(_transform == TextTransform::ToUpper) ? text.toUpper() : text);
+void RoundButton::resizeToText(const TextWithEntities &text) {
+	if (_transform == TextTransform::ToUpper) {
+		_text.setMarkedText(
+			_st.style,
+			{ text.text.toUpper(), text.entities },
+			kMarkupTextOptions);
+	} else {
+		_text.setMarkedText(_st.style, text, kMarkupTextOptions);
+	}
 	int innerWidth = _text.maxWidth() + addedWidth();
 	if (_fullWidthOverride > 0) {
 		const auto padding = _fullRadius
@@ -762,22 +772,34 @@ QImage CrossButton::prepareRippleMask() const {
 
 SettingsButton::SettingsButton(
 	QWidget *parent,
-	rpl::producer<QString> &&text)
-: SettingsButton(parent, std::move(text), st::defaultSettingsButton) {
+	rpl::producer<QString> &&text,
+	const style::SettingsButton &st)
+: SettingsButton(parent, std::move(text) | rpl::map([=](QString &&text) {
+	return TextWithEntities{ std::move(text) };
+}), st) {
 }
 
 SettingsButton::SettingsButton(
 	QWidget *parent,
-	rpl::producer<QString> &&text,
+	rpl::producer<TextWithEntities> &&text,
 	const style::SettingsButton &st)
 : RippleButton(parent, st.ripple)
 , _st(st)
 , _padding(_st.padding) {
 	std::move(
 		text
-	) | rpl::start_with_next([this](QString &&value) {
+	) | rpl::start_with_next([this](TextWithEntities &&value) {
 		setText(std::move(value));
 	}, lifetime());
+}
+
+SettingsButton::SettingsButton(
+	QWidget *parent,
+	nullptr_t,
+	const style::SettingsButton &st)
+: RippleButton(parent, st.ripple)
+, _st(st)
+, _padding(_st.padding) {
 }
 
 SettingsButton::~SettingsButton() = default;
@@ -932,8 +954,8 @@ void SettingsButton::onStateChanged(
 	setPointerCursor(!isDisabled());
 }
 
-void SettingsButton::setText(QString &&text) {
-	_text.setText(_st.style, text);
+void SettingsButton::setText(TextWithEntities &&text) {
+	_text.setMarkedText(_st.style, text, kMarkupTextOptions);
 	update();
 }
 
