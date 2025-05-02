@@ -8,11 +8,21 @@
 
 namespace v::text {
 
+bool is_plain(const data &d) {
+	return v::is<v::null_t>(d)
+		|| v::is<QString>(d)
+		|| v::is<rpl::producer<QString>>(d);
+}
+
+bool is_marked(const data &d) {
+	return !is_plain(d);
+}
+
 rpl::producer<QString> take_plain(
 		data &&d,
 		rpl::producer<QString> &&fallback) {
 	using RplMarked = rpl::producer<TextWithEntities>;
-	if (const auto empty = std::get_if<v::null_t>(&d)) {
+	if (v::is_null(d)) {
 		return std::move(fallback);
 	} else if (const auto ptr = std::get_if<QString>(&d)) {
 		return rpl::single(base::take(*ptr));
@@ -32,7 +42,7 @@ rpl::producer<TextWithEntities> take_marked(
 		data &&d,
 		rpl::producer<TextWithEntities> &&fallback) {
 	using RplMarked = rpl::producer<TextWithEntities>;
-	if (const auto empty = std::get_if<v::null_t>(&d)) {
+	if (v::is_null(d)) {
 		return std::move(fallback);
 	} else if (const auto ptr = std::get_if<QString>(&d)) {
 		return rpl::single(TextWithEntities{ base::take(*ptr) });

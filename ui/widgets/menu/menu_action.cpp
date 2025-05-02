@@ -40,7 +40,7 @@ namespace {
 }
 
 TextParseOptions MenuTextOptions = {
-	TextParseLinks, // flags
+	TextParseLinks | TextParseMarkdown, // flags
 	0, // maxw
 	0, // maxh
 	Qt::LayoutDirectionAuto, // dir
@@ -178,6 +178,10 @@ void Action::setMarkedText(
 	_shortcut = shortcut;
 	setMinWidth(w);
 	update();
+}
+
+const style::Menu &Action::st() const {
+	return _st;
 }
 
 bool Action::isEnabled() const {

@@ -8,10 +8,12 @@
 
 #include "ui/style/style_core_palette.h"
 #include "ui/style/style_core.h"
+#include "ui/painter.h"
 #include "base/basic_types.h"
 
 #include <QtCore/QMutex>
 #include <QtGui/QPainter>
+#include <QtSvg/QSvgRenderer>
 
 namespace style {
 namespace internal {
@@ -32,6 +34,44 @@ base::flat_set<IconData*> iconData;
 		int scale,
 		bool ignoreDpr = false) {
 	const auto ratio = ignoreDpr ? 1 : DevicePixelRatio();
+	const auto realscale = scale * ratio;
+
+	auto data = QByteArray::fromRawData(
+		reinterpret_cast<const char*>(mask->data()),
+		mask->size());
+	if (data.startsWith("SVG:")) {
+		auto size = QSize();
+		data = QByteArray::fromRawData(data.constData() + 4, data.size() - 4);
+		if (data.startsWith("SIZE:")) {
+			data = QByteArray::fromRawData(data.constData() + 5, data.size() - 5);
+
+			QDataStream stream(data);
+			stream.setVersion(QDataStream::Qt_5_1);
+
+			qint32 width = 0, height = 0;
+			stream >> width >> height;
+			Assert(stream.status() == QDataStream::Ok);
+
+			size = QSize(width, height);
+			data = QByteArray::fromRawData(data.constData() + 8, data.size() - 8);
+		}
+		auto svg = QSvgRenderer(data);
+		Assert(svg.isValid());
+		if (size.isEmpty()) {
+			size = svg.defaultSize();
+		}
+		const auto width = ConvertScale(size.width(), scale);
+		const auto height = ConvertScale(size.height(), scale);
+		auto maskImage = QImage(
+			QSize(width, height) * ratio,
+			QImage::Format_ARGB32_Premultiplied);
+		maskImage.fill(Qt::transparent);
+		maskImage.setDevicePixelRatio(ratio);
+		auto p = QPainter(&maskImage);
+		auto hq = PainterHighQualityEnabler(p);
+		svg.render(&p, QRectF(0, 0, width, height));
+		return maskImage;
+	}
 
 	auto maskImage = QImage::fromData(mask->data(), mask->size(), "PNG");
 	maskImage.setDevicePixelRatio(ratio);
@@ -40,7 +80,6 @@ base::flat_set<IconData*> iconData;
 	// images are laid out like this:
 	// 100x 200x
 	// 300x
-	const auto realscale = scale * ratio;
 	const auto width = maskImage.width() / 3;
 	const auto height = maskImage.height() / 5;
 	const auto one = QRect(0, 0, width, height);
