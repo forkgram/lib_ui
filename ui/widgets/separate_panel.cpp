@@ -26,7 +26,6 @@
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/qt_object_factory.h"
-#include "ui/qt_weak_factory.h"
 #include "ui/ui_utility.h"
 #include "base/platform/base_platform_info.h"
 #include "base/debug_log.h"
@@ -768,7 +767,7 @@ void SeparatePanel::setMenuAllowed(
 			| (_title ? _title->geometry() : QRect())
 			| (_titleBadge ? _titleBadge->geometry() : QRect());
 		auto p = QPainter(&_animationCache);
-		p.fillRect(rect, st::windowBg);
+		p.fillRect(rect, computeBgColors().title);
 		OverlayWidgetCache(p, _title);
 		OverlayWidgetCache(p, _titleBadge);
 		OverlayWidgetCache(p, _menuToggle);
@@ -809,7 +808,7 @@ bool SeparatePanel::closeSearch() {
 }
 
 void SeparatePanel::toggleSearch(bool shown) {
-	const auto weak = Ui::MakeWeak(this);
+	const auto weak = base::make_weak(this);
 	if (shown) {
 		if (_searchWrap && _searchWrap->toggled()) {
 			return;
@@ -925,8 +924,8 @@ bool SeparatePanel::createMenu(not_null<IconButton*> button) {
 	}
 	_menu = base::make_unique_q<PopupMenu>(this, _menuSt);
 	_menu->setDestroyedCallback([
-		weak = MakeWeak(this),
-			weakButton = MakeWeak(button),
+		weak = base::make_weak(this),
+			weakButton = base::make_weak(button),
 			menu = _menu.get()]{
 		if (weak && weak->_menu == menu) {
 			if (weakButton) {
@@ -1523,6 +1522,25 @@ void SeparatePanel::paintShadowBorder(QPainter &p) const {
 	paintBodyBg(p, radius);
 }
 
+SeparatePanel::BgColors SeparatePanel::computeBgColors() const {
+	const auto bg = _bodyOverrideColor.value_or(st::windowBg->c);
+	const auto chosenFooter = (_bottomBarHeight && _bottomBarOverrideColor)
+		? _bottomBarOverrideColor
+		: _bodyOverrideColor;
+	const auto footerColor = chosenFooter.value_or(st::windowBg->c);
+	const auto chosenHeader = (_titleHeight
+		&& !_fullscreen.current()
+		&& _titleOverrideColor)
+		? _titleOverrideColor
+		: _bodyOverrideColor;
+	const auto titleColor = chosenHeader.value_or(st::windowBg->c);
+	return {
+		.title = titleColor,
+		.bg = bg,
+		.footer = footerColor,
+	};
+}
+
 void SeparatePanel::paintBodyBg(QPainter &p, int radius) const {
 	const auto padding = computePadding();
 	const auto fillBody = [&](int from, int till, QColor color) {
@@ -1536,38 +1554,28 @@ void SeparatePanel::paintBodyBg(QPainter &p, int radius) const {
 			till - from,
 			color);
 	};
-	const auto bg = _bodyOverrideColor.value_or(st::windowBg->c);
-	const auto chosenFooter = (_bottomBarHeight && _bottomBarOverrideColor)
-		? _bottomBarOverrideColor
-		: _bodyOverrideColor;
-	const auto footerColor = chosenFooter.value_or(st::windowBg->c);
-	const auto chosenHeader = (_titleHeight
-		&& !_fullscreen.current()
-		&& _titleOverrideColor)
-		? _titleOverrideColor
-		: _bodyOverrideColor;
-	const auto titleColor = chosenHeader.value_or(st::windowBg->c);
+	const auto bg = computeBgColors();
 	const auto niceOverscroll = !_layer && ::Platform::IsMac();
-	if ((niceOverscroll && titleColor == footerColor)
-		|| (titleColor == footerColor && titleColor == bg)) {
+	if ((niceOverscroll && bg.title == bg.footer)
+		|| (bg.title == bg.footer && bg.title == bg.bg)) {
 		fillBody(
 			padding.top() + radius,
 			height() - padding.bottom() - radius,
-			titleColor);
-	} else if (niceOverscroll || titleColor == bg || footerColor == bg) {
+			bg.title);
+	} else if (niceOverscroll || bg.title == bg.bg || bg.footer == bg.bg) {
 		const auto top = niceOverscroll
 			? (height() / 2)
-			: (titleColor != bg)
+			: (bg.title != bg.bg)
 			? (padding.top() + _titleHeight)
 			: (height() - padding.bottom() - _bottomBarHeight);
-		fillBody(padding.top() + radius, top, titleColor);
-		fillBody(top, height() - padding.bottom() - radius, footerColor);
+		fillBody(padding.top() + radius, top, bg.title);
+		fillBody(top, height() - padding.bottom() - radius, bg.footer);
 	} else {
 		const auto one = padding.top() + _titleHeight;
 		const auto two = height() - padding.bottom() - _bottomBarHeight;
-		fillBody(padding.top() + radius, one, titleColor);
-		fillBody(one, two, bg);
-		fillBody(two, height() - padding.bottom() - radius, footerColor);
+		fillBody(padding.top() + radius, one, bg.title);
+		fillBody(one, two, bg.bg);
+		fillBody(two, height() - padding.bottom() - radius, bg.footer);
 	}
 }
 
