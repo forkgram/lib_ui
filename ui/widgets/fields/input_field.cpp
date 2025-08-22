@@ -55,7 +55,7 @@ constexpr auto kPreLanguage = QTextFormat::UserProperty + 10;
 constexpr auto kCollapsedQuoteFormat = QTextFormat::UserObject + 1;
 constexpr auto kCustomEmojiFormat = QTextFormat::UserObject + 2;
 
-const auto kObjectReplacementCh = QChar(QChar::ObjectReplacementCharacter);
+constexpr auto kObjectReplacementCh = QChar(QChar::ObjectReplacementCharacter);
 const auto kObjectReplacement = QString::fromRawData(
 	&kObjectReplacementCh,
 	1);
@@ -1528,6 +1528,9 @@ InputField::InputField(
 	_inner->setDocument(CreateChild<InputDocument>(_inner.get(), _st));
 	_inner->setAcceptRichText(false);
 	resize(_st.width, _minHeight);
+	if (_st.width > 0) {
+		setNaturalWidth(_st.width);
+	}
 
 	{ // In case of default fonts all those should be zero.
 		const auto metrics = QFontMetricsF(_st.style.font->f);
@@ -4314,6 +4317,14 @@ void InputField::inputMethodEventInner(QInputMethodEvent *e) {
 		_lastPreEditText = preedit;
 		startPlaceholderAnimation();
 	}
+	if (!e->commitString().isEmpty()) {
+		if (Emoji::Find(e->commitString(), nullptr)) {
+			auto mimeData = QMimeData();
+			mimeData.setText(e->commitString());
+			InputField::insertFromMimeDataInner(&mimeData);
+			return;
+		}
+	}
 	_inputMethodCommit = e->commitString();
 
 	const auto weak = base::make_weak(this);
@@ -5385,6 +5396,24 @@ void AddLengthLimitLabel(
 		warning->moveToRight(0, top + limitLabelTop);
 	}, warning->lifetime());
 	warning->setAttribute(Qt::WA_TransparentForMouseEvents);
+}
+
+bool ShouldSubmit(QKeyEvent *event, InputSubmitSettings settings) {
+	if (event == nullptr || settings == InputSubmitSettings::None) {
+		return false;
+	}
+
+	const int key = event->key();
+	const bool isEnter = (key == Qt::Key_Enter || key == Qt::Key_Return);
+	const bool hasCtrl = event->modifiers().testFlag(Qt::ControlModifier);
+
+	switch (settings) {
+	case InputSubmitSettings::Enter: return isEnter && !hasCtrl;
+	case InputSubmitSettings::CtrlEnter: return isEnter && hasCtrl;
+	case InputSubmitSettings::Both: return isEnter;
+	case InputSubmitSettings::None:
+	default: return false;
+	}
 }
 
 } // namespace Ui

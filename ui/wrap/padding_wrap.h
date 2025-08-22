@@ -28,11 +28,10 @@ public:
 	}
 	void setPadding(const style::margins &padding);
 
-	int naturalWidth() const override;
-
 protected:
 	int resizeGetHeight(int newWidth) override;
 	void wrappedSizeUpdated(QSize size) override;
+	void wrappedNaturalWidthUpdated(int width) override;
 
 private:
 	style::margins _padding;
@@ -49,42 +48,6 @@ public:
 		object_ptr<Widget> &&child,
 		const style::margins &padding)
 	: Parent(parent, std::move(child), padding) {
-	}
-
-};
-
-template <typename Widget = RpWidget>
-class CenterWrap;
-
-template <>
-class CenterWrap<RpWidget> : public Wrap<RpWidget> {
-	using Parent = Wrap<RpWidget>;
-
-public:
-	CenterWrap(
-		QWidget *parent,
-		object_ptr<RpWidget> &&child);
-
-	int naturalWidth() const override;
-
-protected:
-	int resizeGetHeight(int newWidth) override;
-	void wrappedSizeUpdated(QSize size) override;
-
-private:
-	void updateWrappedPosition(int forWidth);
-
-};
-
-template <typename Widget>
-class CenterWrap : public Wrap<Widget, CenterWrap<RpWidget>> {
-	using Parent = Wrap<Widget, CenterWrap<RpWidget>>;
-
-public:
-	CenterWrap(
-		QWidget *parent,
-		object_ptr<Widget> &&child)
-	: Parent(parent, std::move(child)) {
 	}
 
 };

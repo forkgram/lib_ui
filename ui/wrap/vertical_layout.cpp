@@ -34,20 +34,6 @@ QMargins VerticalLayout::getMargins() const {
 	return result;
 }
 
-int VerticalLayout::naturalWidth() const {
-	auto result = 0;
-	for (auto &row : _rows) {
-		const auto natural = row.widget->naturalWidth();
-		if (natural < 0) {
-			return natural;
-		}
-		accumulate_max(
-			result,
-			row.margin.left() + natural + row.margin.right());
-	}
-	return result;
-}
-
 void VerticalLayout::setVerticalShift(int index, int shift) {
 	Expects(index >= 0 && index < _rows.size());
 
@@ -69,23 +55,29 @@ void VerticalLayout::reorderRows(int oldIndex, int newIndex) {
 }
 
 int VerticalLayout::resizeGetHeight(int newWidth) {
+	if (newWidth <= 0) {
+		return 0;
+	}
 	_inResize = true;
 	auto guard = gsl::finally([&] { _inResize = false; });
 
-	auto margins = getMargins();
-	auto result = 0;
+	const auto margins = getMargins();
+	const auto outerWidth = margins.left() + newWidth + margins.right();
+	auto result = margins.top();
 	for (auto &row : _rows) {
-		updateChildGeometry(
-			margins,
-			row.widget,
-			row.margin,
-			newWidth,
-			result + row.verticalShift);
-		result += row.margin.top()
-			+ row.widget->heightNoMargins()
-			+ row.margin.bottom();
+		const auto widget = row.widget.data();
+		const auto &margin = row.margin;
+		const auto available = newWidth - margin.left() - margin.right();
+		if (available > 0) {
+			if (row.align == kAlignJustify) {
+				widget->resizeToWidth(available);
+			} else {
+				widget->resizeToNaturalWidth(available);
+			}
+		}
+		result += moveChildGetSkip(row, result, outerWidth, margins);
 	}
-	return result;
+	return result - margins.top();
 }
 
 void VerticalLayout::visibleTopBottomUpdated(
@@ -99,39 +91,60 @@ void VerticalLayout::visibleTopBottomUpdated(
 	}
 }
 
-void VerticalLayout::updateChildGeometry(
-		const style::margins &margins,
-		RpWidget *child,
-		const style::margins &margin,
-		int width,
-		int top) const {
-	auto availRowWidth = width
-		- margin.left()
-		- margin.right();
-	child->resizeToNaturalWidth(availRowWidth);
-	child->moveToLeft(
-		margins.left() + margin.left(),
-		margins.top() + margin.top() + top,
-		width);
+int VerticalLayout::moveChildGetSkip(
+		const Row &row,
+		int top,
+		int outerWidth,
+		const style::margins &margins) const {
+	const auto align = row.align;
+	const auto widget = row.widget.data();
+	const auto wmargins = widget->getMargins();
+	const auto &margin = row.margin;
+	const auto full = margins + margin;
+	top += margin.top() + row.verticalShift;
+	if (align == kAlignLeft || align == kAlignJustify) {
+		widget->moveToLeft(full.left(), top, outerWidth);
+	} else if (align == kAlignCenter) {
+		const auto available = outerWidth - full.left() - full.right();
+		const auto free = available
+			- widget->width()
+			+ wmargins.left()
+			+ wmargins.right();
+		widget->moveToLeft(full.left() + (free / 2), top, outerWidth);
+	} else if (align == kAlignRight) {
+		widget->moveToRight(full.right(), top, outerWidth);
+	}
+	return margin.top()
+		- wmargins.top()
+		+ widget->height()
+		- wmargins.bottom()
+		+ margin.bottom();
 }
 
 RpWidget *VerticalLayout::insertChild(
 		int atPosition,
 		object_ptr<RpWidget> child,
-		const style::margins &margin) {
+		const style::margins &margin,
+		style::align align) {
 	Expects(atPosition >= 0 && atPosition <= _rows.size());
 	Expects(!_inResize);
 
 	if (const auto weak = AttachParentChild(this, child)) {
+		const auto converted = (align == style::al_justify)
+			? kAlignJustify
+			: (align & style::al_left)
+			? kAlignLeft
+			: (align & style::al_right)
+			? kAlignRight
+			: kAlignCenter;
 		_rows.insert(
 			begin(_rows) + atPosition,
-			{ std::move(child), margin });
-		auto availRowWidth = widthNoMargins()
-			- margin.left()
-			- margin.right();
-		if (availRowWidth > 0) {
-			weak->resizeToNaturalWidth(availRowWidth);
+			{ std::move(child), margin, 0, converted });
+
+		if (converted != kAlignJustify) {
+			subscribeToWidth(weak, margin);
 		}
+
 		weak->heightValue(
 		) | rpl::start_with_next_done([=] {
 			if (!_inResize) {
@@ -140,9 +153,68 @@ RpWidget *VerticalLayout::insertChild(
 		}, [=] {
 			removeChild(weak);
 		}, _rowsLifetime);
+
 		return weak;
 	}
 	return nullptr;
+}
+
+void VerticalLayout::subscribeToWidth(
+		not_null<RpWidget*> child,
+		const style::margins &margin) {
+	child->naturalWidthValue(
+	) | rpl::start_with_next([=](int naturalWidth) {
+		setNaturalWidth([&] {
+			if (naturalWidth < 0) {
+				return -1;
+			}
+			auto result = -1;
+			for (const auto &row : _rows) {
+				if (row.align == kAlignJustify) {
+					return -1;
+				}
+				const auto natural = row.widget->naturalWidth();
+				if (natural < 0) {
+					return -1;
+				}
+				accumulate_max(
+					result,
+					row.margin.left() + natural + row.margin.right());
+			}
+			return result;
+		}());
+
+		const auto available = widthNoMargins()
+			- margin.left()
+			- margin.right();
+		if (available > 0) {
+			child->resizeToWidth((naturalWidth >= 0)
+				? std::min(naturalWidth, available)
+				: available);
+		}
+	}, _rowsLifetime);
+
+	const auto taken = std::exchange(_inResize, true);
+	child->widthValue(
+	) | rpl::start_with_next([=] {
+		if (!_inResize) {
+			childWidthUpdated(child);
+		}
+	}, _rowsLifetime);
+	_inResize = taken;
+}
+
+void VerticalLayout::childWidthUpdated(RpWidget *child) {
+	const auto it = ranges::find_if(_rows, [child](const Row &row) {
+		return (row.widget == child);
+	});
+	const auto &row = *it;
+	const auto margins = getMargins();
+	const auto top = child->y()
+		+ child->getMargins().top()
+		- row.margin.top()
+		- row.verticalShift;
+	moveChildGetSkip(row, top, width(), margins);
 }
 
 void VerticalLayout::childHeightUpdated(RpWidget *child) {
@@ -150,26 +222,24 @@ void VerticalLayout::childHeightUpdated(RpWidget *child) {
 		return (row.widget == child);
 	});
 
-	auto margins = getMargins();
+	const auto width = this->width();
+	const auto margins = getMargins();
 	auto top = [&] {
 		if (it == _rows.begin()) {
 			return margins.top();
 		}
 		auto prev = it - 1;
-		return prev->widget->bottomNoMargins() + prev->margin.bottom();
-	}() - margins.top();
+		const auto widget = prev->widget.data();
+		return widget->y()
+			+ widget->height()
+			- widget->getMargins().bottom()
+			+ prev->margin.bottom();
+	}();
 	for (auto end = _rows.end(); it != end; ++it) {
-		auto &row = *it;
-		auto margin = row.margin;
-		auto widget = row.widget.data();
-		widget->moveToLeft(
-			margins.left() + margin.left(),
-			margins.top() + top + margin.top());
-		top += margin.top()
-			+ widget->heightNoMargins()
-			+ margin.bottom();
+		const auto &row = *it;
+		top += moveChildGetSkip(row, top, width, margins);
 	}
-	resize(width(), margins.top() + top + margins.bottom());
+	resize(width, top + margins.bottom());
 }
 
 void VerticalLayout::removeChild(RpWidget *child) {
@@ -179,29 +249,27 @@ void VerticalLayout::removeChild(RpWidget *child) {
 	auto end = _rows.end();
 	Assert(it != end);
 
-	auto margins = getMargins();
+	const auto width = this->width();
+	const auto margins = getMargins();
 	auto top = [&] {
 		if (it == _rows.begin()) {
 			return margins.top();
 		}
 		auto prev = it - 1;
-		return prev->widget->bottomNoMargins() + prev->margin.bottom();
-	}() - margins.top();
+		const auto widget = prev->widget.data();
+		return widget->y()
+			+ widget->height()
+			- widget->getMargins().bottom()
+			+ prev->margin.bottom();
+	}();
 	for (auto next = it + 1; next != end; ++next) {
-		auto &row = *next;
-		auto margin = row.margin;
-		auto widget = row.widget.data();
-		widget->moveToLeft(
-			margins.left() + margin.left(),
-			margins.top() + top + margin.top());
-		top += margin.top()
-			+ widget->heightNoMargins()
-			+ margin.bottom();
+		const auto &row = *next;
+		top += moveChildGetSkip(row, top, width, margins);
 	}
 	it->widget = nullptr;
 	_rows.erase(it);
 
-	resize(width(), margins.top() + top + margins.bottom());
+	resize(width, top + margins.bottom());
 }
 
 void VerticalLayout::clear() {

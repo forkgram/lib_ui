@@ -48,10 +48,8 @@ void NumbersAnimation::animationCallback() {
 	if (_widthChangedCallback) {
 		_widthChangedCallback();
 	}
-	if (!_a_ready.animating()) {
-		if (!_delayedText.isEmpty()) {
-			setText(_delayedText, _delayedValue);
-		}
+	if (!_a_ready.animating() && !_delayedText.isEmpty()) {
+		setText(_delayedText, _delayedValue);
 	}
 }
 
@@ -188,6 +186,10 @@ LabelWithNumbers::LabelWithNumbers(
 , _afterWidth(st.style.font->width(_after)) {
 	Expects((value.offset < 0) == (value.length == 0));
 
+	_numbers.setWidthChangedCallback([=] {
+		updateNaturalWidth();
+	});
+
 	const auto numbers = GetNumbers(value);
 	_numbers.setText(numbers, numbers.toInt());
 	_numbers.finishAnimating();
@@ -226,6 +228,12 @@ void LabelWithNumbers::setValue(const StringWithNumbers &value) {
 		anim::easeOutCirc);
 
 	_afterWidth = _st.style.font->width(_after);
+
+	updateNaturalWidth();
+}
+
+void LabelWithNumbers::updateNaturalWidth() {
+	setNaturalWidth(_beforeWidth + _numbers.maxWidth() + _afterWidth);
 }
 
 void LabelWithNumbers::finishAnimating() {
