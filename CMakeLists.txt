@@ -273,6 +273,8 @@ PRIVATE
     ui/wrap/wrap.h
     ui/abstract_button.cpp
     ui/abstract_button.h
+    ui/accessibility.cpp
+    ui/accessibility.h
     ui/animated_icon.cpp
     ui/animated_icon.h
     ui/arc_angles.h

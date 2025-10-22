@@ -68,6 +68,8 @@ LinkButton::LinkButton(
 , _textWidth(st.font->width(_text)) {
 	resizeToText();
 	setCursor(style::cur_pointer);
+	setAccessibleRole(QAccessible::Role::Link);
+	setAccessibleName(text);
 }
 
 void LinkButton::paintEvent(QPaintEvent *e) {
@@ -94,6 +96,7 @@ void LinkButton::paintEvent(QPaintEvent *e) {
 void LinkButton::setText(const QString &text) {
 	_text = text;
 	_textWidth = _st.font->width(_text);
+	setAccessibleName(text);
 	resizeToText();
 	update();
 }
@@ -232,10 +235,12 @@ FlatButton::FlatButton(
 		_width = _st.width;
 	}
 	resize(_width, _st.height);
+	setAccessibleName(text);
 }
 
 void FlatButton::setText(const QString &text) {
 	_text = text;
+	setAccessibleName(text);
 	update();
 }
 
@@ -304,6 +309,7 @@ RoundButton::RoundButton(
 	_textFull.value(
 	) | rpl::start_with_next([=](const TextWithEntities &text) {
 		resizeToText(text);
+		setAccessibleName(text.text);
 	}, lifetime());
 }
 
@@ -802,7 +808,7 @@ SettingsButton::SettingsButton(
 
 SettingsButton::SettingsButton(
 	QWidget *parent,
-	nullptr_t,
+	std::nullptr_t,
 	const style::SettingsButton &st)
 : RippleButton(parent, st.ripple)
 , _st(st)
@@ -963,6 +969,7 @@ void SettingsButton::onStateChanged(
 
 void SettingsButton::setText(TextWithEntities &&text) {
 	_text.setMarkedText(_st.style, text, kMarkupTextOptions, _context);
+	setAccessibleName(text.text);
 	update();
 }
 

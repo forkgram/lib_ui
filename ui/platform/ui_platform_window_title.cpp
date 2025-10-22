@@ -15,6 +15,7 @@
 #include "styles/palette.h"
 #include "base/algorithm.h"
 #include "base/event_filter.h"
+#include "ui/integration.h"
 #include "base/platform/base_platform_info.h"
 
 #include <QtGui/QPainter>
@@ -91,6 +92,7 @@ void IconTitleButtons::updateState(
 			? &st.minimizeIconActiveOver
 			: &st.minimize.iconOver;
 		_minimize->setIconOverride(minimize, minimizeOver);
+		_minimize->setAccessibleName(Ui::Integration::Instance().phraseMinimize());
 	}
 	if (_maximizeRestore) {
 		if (maximized) {
@@ -101,6 +103,7 @@ void IconTitleButtons::updateState(
 				? &st.restoreIconActiveOver
 				: &st.restoreIconOver;
 			_maximizeRestore->setIconOverride(restore, restoreOver);
+			_maximizeRestore->setAccessibleName(Ui::Integration::Instance().phraseRestore());
 		} else {
 			const auto maximize = active
 				? &st.maximizeIconActive
@@ -109,6 +112,7 @@ void IconTitleButtons::updateState(
 				? &st.maximizeIconActiveOver
 				: &st.maximize.iconOver;
 			_maximizeRestore->setIconOverride(maximize, maximizeOver);
+			_maximizeRestore->setAccessibleName(Ui::Integration::Instance().phraseMaximize());
 		}
 	}
 	if (_close) {
@@ -119,6 +123,7 @@ void IconTitleButtons::updateState(
 			? &st.closeIconActiveOver
 			: &st.close.iconOver;
 		_close->setIconOverride(close, closeOver);
+		_close->setAccessibleName(Ui::Integration::Instance().phraseButtonClose());
 	}
 	if (_top) {
 		const auto top = active
