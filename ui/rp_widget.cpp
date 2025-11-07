@@ -314,6 +314,11 @@ auto RpWidgetWrap::eventStreams() const -> EventStreams& {
 	return *_eventStreams;
 }
 
+void AccessibilityState::writeTo(QAccessible::State &state) {
+	state.checkable = checkable ? 1 : 0;
+	state.checked = checked ? 1 : 0;
+}
+
 RpWidget::RpWidget(QWidget *parent)
 : RpWidgetBase<QWidget>(parent) {
 	[[maybe_unused]] static const auto Once = [] {
@@ -357,6 +362,26 @@ QString RpWidget::accessibilityDescription() {
 
 void RpWidget::accessibilityDescriptionChanged() {
 	QAccessibleEvent event(this, QAccessible::DescriptionChanged);
+	QAccessible::updateAccessibility(&event);
+}
+
+AccessibilityState RpWidget::accessibilityState() const {
+	return {};
+}
+
+void RpWidget::accessibilityStateChanged(AccessibilityState changes) {
+	auto fields = QAccessible::State();
+	changes.writeTo(fields);
+	QAccessibleStateChangeEvent event(this, fields);
+	QAccessible::updateAccessibility(&event);
+}
+
+QString RpWidget::accessibilityValue() const {
+	return QString();
+}
+
+void RpWidget::accessibilityValueChanged() {
+	QAccessibleValueChangeEvent event(this, accessibilityValue());
 	QAccessible::updateAccessibility(&event);
 }
 

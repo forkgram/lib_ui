@@ -186,8 +186,9 @@ public:
 	QString accessibilityName() override {
 		return _text.toString();
 	}
+	AccessibilityState accessibilityState() const override;
 
-	void setText(const QString &text, bool rich = false);
+	void setText(const QString &text);
 	void setCheckAlignment(style::align alignment);
 	void setAllowTextLines(int lines = 0);
 	void setTextBreakEverywhere(bool allow = true);
@@ -232,6 +233,9 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void leaveEventHook(QEvent *e) override;
 
+	void keyPressEvent(QKeyEvent *e) override;
+	void keyReleaseEvent(QKeyEvent *e) override;
+
 	void onStateChanged(State was, StateChangeSource source) override;
 	int resizeGetHeight(int newWidth) override;
 
@@ -242,10 +246,12 @@ protected:
 
 private:
 	void resizeToText();
+	void setMarkedText(const TextWithEntities &text);
 	void updateNaturalWidth();
 	QPixmap grabCheckCache() const;
 	int countTextMinWidth() const;
 	Text::StateResult getTextState(const QPoint &m) const;
+	[[nodiscard]] bool isSubmitEvent(not_null<QKeyEvent*> e) const;
 
 	const style::Checkbox &_st;
 	std::unique_ptr<AbstractCheckView> _check;
@@ -293,14 +299,14 @@ public:
 
 private:
 	friend class Radiobutton;
-	void registerButton(Radiobutton *button);
-	void unregisterButton(Radiobutton *button);
+	void registerButton(not_null<Radiobutton*> button);
+	void unregisterButton(not_null<Radiobutton*> button);
 
 	int _value = 0;
 	bool _hasValue = false;
 	Fn<void(int value)> _changedCallback;
 	rpl::event_stream<int> _changes;
-	std::vector<Radiobutton*> _buttons;
+	std::vector<not_null<Radiobutton*>> _buttons;
 
 };
 
@@ -328,18 +334,20 @@ public:
 
 protected:
 	void handlePress() override;
+	void keyPressEvent(QKeyEvent *e) override;
 
 private:
 	// Hide the names from Checkbox.
-	bool checked() const;
+	[[nodiscard]] bool checked() const;
 	void checkedChanges() const;
 	void checkedValue() const;
 	void setChecked(bool checked, NotifyAboutChange notify);
+	void trackScreenReaderState();
 
-	Checkbox *checkbox() {
+	[[nodiscard]] Checkbox *checkbox() {
 		return this;
 	}
-	const Checkbox *checkbox() const {
+	[[nodiscard]] const Checkbox *checkbox() const {
 		return this;
 	}
 

@@ -23,6 +23,17 @@ FlatLabel {
 	palette: TextPalette;
 }
 
+DividerBar {
+	bg: color;
+	top: icon;
+	bottom: icon;
+}
+
+DividerLabel {
+	bar: DividerBar;
+	label: FlatLabel;
+}
+
 LinkButton {
 	color: color;
 	overColor: color;
@@ -348,6 +359,8 @@ MediaSlider {
 	receivedTillFg: color;
 	seekSize: size;
 	duration: int;
+	borderFg: color;
+	borderWidth: pixels;
 }
 
 FilledSlider {
@@ -654,6 +667,27 @@ defaultFlatLabel: FlatLabel {
 }
 defaultSubTextLabel: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
+}
+
+boxDividerTop: icon {{ "box_divider_top", boxDividerFg }};
+boxDividerBottom: icon {{ "box_divider_bottom", boxDividerFg }};
+boxDividerHeight: 8px;
+defaultDividerBar: DividerBar {
+	bg: boxDividerBg;
+	top: boxDividerTop;
+	bottom: boxDividerBottom;
+}
+
+boxDividerLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 245px;
+	align: align(topleft);
+	textFg: windowSubTextFg;
+	style: defaultTextStyle;
+}
+defaultBoxDividerLabelPadding: margins(22px, 8px, 22px, 16px);
+defaultDividerLabel: DividerLabel {
+	bar: defaultDividerBar;
+	label: boxDividerLabel;
 }
 
 defaultLinkButton: LinkButton {
@@ -1138,6 +1172,8 @@ defaultContinuousSlider: MediaSlider {
 	receivedTillFg: mediaPlayerInactiveFg;
 	seekSize: size(9px, 9px);
 	duration: 150;
+	borderFg: transparent;
+	borderWidth: 0px;
 }
 
 defaultRoundCheckbox: RoundCheckbox {
