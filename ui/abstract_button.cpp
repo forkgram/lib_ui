@@ -167,7 +167,12 @@ bool AbstractButton::setDown(
 		&& (_acceptBoth || button == Qt::LeftButton)) {
 		auto was = _state;
 		_state |= StateFlag::Down;
+
+		const auto weak = base::make_weak(this);
 		onStateChanged(was, source);
+		if (weak) {
+			accessibilityStateChanged({ .pressed = true });
+		}
 		return true;
 	} else if (!down && (_state & StateFlag::Down)) {
 		const auto was = _state;
@@ -176,6 +181,7 @@ bool AbstractButton::setDown(
 		const auto weak = base::make_weak(this);
 		onStateChanged(was, source);
 		if (weak) {
+			accessibilityStateChanged({ .pressed = true });
 			if (was & StateFlag::Over) {
 				clicked(modifiers, button);
 			} else {
@@ -211,5 +217,9 @@ void AbstractButton::clearState() {
 	_state = StateFlag::None;
 	onStateChanged(was, StateChangeSource::ByUser);
 }
+
+AccessibilityState AbstractButton::accessibilityState() const {
+	return { .pressed = isDown() };
+	}
 
 } // namespace Ui

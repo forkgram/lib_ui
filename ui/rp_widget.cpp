@@ -13,6 +13,7 @@
 #include <QtGui/QWindow>
 #include <QtGui/QtEvents>
 #include <QtGui/QColorSpace>
+#include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
 
 namespace Ui {
@@ -126,6 +127,14 @@ rpl::producer<bool> RpWidgetWrap::windowActiveValue() const {
 
 rpl::producer<QRect> RpWidgetWrap::paintRequest() const {
 	return eventStreams().paint.events();
+}
+
+void RpWidgetWrap::paintOn(Fn<void(QPainter&)> callback) {
+	const auto widget = rpWidget();
+	paintRequest() | rpl::start_with_next([=] {
+		auto p = QPainter(widget);
+		callback(p);
+	}, lifetime());
 }
 
 rpl::producer<> RpWidgetWrap::alive() const {
@@ -317,6 +326,7 @@ auto RpWidgetWrap::eventStreams() const -> EventStreams& {
 void AccessibilityState::writeTo(QAccessible::State &state) {
 	state.checkable = checkable ? 1 : 0;
 	state.checked = checked ? 1 : 0;
+	state.pressed = pressed ? 1 : 0;
 }
 
 RpWidget::RpWidget(QWidget *parent)
