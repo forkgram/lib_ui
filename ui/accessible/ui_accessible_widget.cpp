@@ -6,6 +6,7 @@
 //
 #include "ui/accessible/ui_accessible_widget.h"
 
+#include "base/debug_log.h"
 #include "base/screen_reader_state.h"
 #include "base/timer.h"
 #include "ui/rp_widget.h"
@@ -36,10 +37,11 @@ FocusManager::FocusManager() : _cleanupTimer([=] { cleanup(); }) {
 	base::ScreenReaderState::Instance()->activeValue(
 	) | rpl::start_with_next([=](bool active) {
 		_active = active;
+		LOG(("Screen Reader: %1").arg(active ? "active" : "inactive"));
 
 		cleanup();
 		for (const auto &widget : _widgets) {
-			widget->setFocusPolicy(active ? Qt::StrongFocus : Qt::NoFocus);
+			widget->setFocusPolicy(active ? Qt::TabFocus : Qt::NoFocus);
 		}
 	}, _lifetime);
 }
@@ -53,7 +55,7 @@ void FocusManager::registerWidget(not_null<RpWidget*> widget) {
 		return;
 	}
 	if (_active) {
-		widget->setFocusPolicy(Qt::StrongFocus);
+		widget->setFocusPolicy(Qt::TabFocus);
 	}
 	_widgets.push_back(widget.get());
 	if (!_cleanupTimer.isActive()) {
