@@ -1065,6 +1065,14 @@ AccessibilityState Checkbox::accessibilityState() const {
 	return { .checkable = true, .checked = checked() };
 }
 
+void Checkbox::accessibilityDoAction(const QString &name) {
+	if (name == QAccessibleActionInterface::pressAction()) {
+		if (!isDisabled()) {
+			handlePress();
+		}
+	}
+}
+
 bool Checkbox::isSubmitEvent(not_null<QKeyEvent*> e) const {
 	return !e->isAutoRepeat()
 		&& (e->key() == Qt::Key_Space

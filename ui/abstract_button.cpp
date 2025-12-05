@@ -222,4 +222,12 @@ AccessibilityState AbstractButton::accessibilityState() const {
 	return { .pressed = isDown() };
 	}
 
+void AbstractButton::accessibilityDoAction(const QString &name) {
+	if (name == QAccessibleActionInterface::pressAction()) {
+		if (!isDisabled()) {
+			clicked(Qt::NoModifier, Qt::LeftButton);
+		}
+	}
+}
+
 } // namespace Ui
