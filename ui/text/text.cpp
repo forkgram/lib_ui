@@ -131,7 +131,7 @@ void SpoilerMessCache::reset() {
 not_null<SpoilerMessCache*> DefaultSpoilerCache() {
 	struct Data {
 		Data() : cache(kDefaultSpoilerCacheCapacity) {
-			style::PaletteChanged() | rpl::start_with_next([=] {
+			style::PaletteChanged() | rpl::on_next([=] {
 				cache.reset();
 			}, lifetime);
 		}
@@ -647,7 +647,7 @@ void String::recountNaturalSize(
 	if (width > 0) {
 		const auto useSkipHeight = (_blocks.back()->type() == TextBlockType::Skip)
 			&& (_words.back().f_width() == width);
-		_minHeight += qpadding.top() + qpadding.bottom();
+		_minHeight += qpadding.bottom();
 		if (qlinesleft != 0) {
 			_minHeight += useSkipHeight
 				? _blocks.back().unsafe<SkipBlock>().height()

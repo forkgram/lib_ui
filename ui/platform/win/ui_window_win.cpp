@@ -355,7 +355,7 @@ void WindowHelper::overrideSystemButtonDown(HitTestResult button) {
 void WindowHelper::init() {
 	_title->show();
 
-	window()->winIdValue() | rpl::start_with_next([=](WId winId) {
+	window()->winIdValue() | rpl::on_next([=](WId winId) {
 		_handle = reinterpret_cast<HWND>(winId);
 
 		if (!::Platform::IsWindows8OrGreater()) {
@@ -381,7 +381,7 @@ void WindowHelper::init() {
 	}, window()->lifetime());
 
 	style::PaletteChanged(
-	) | rpl::start_with_next([=] {
+	) | rpl::on_next([=] {
 		if (_shadow) {
 			_shadow->setColor(st::windowShadowFg->c);
 		}
@@ -393,7 +393,7 @@ void WindowHelper::init() {
 		window()->sizeValue(),
 		_title->heightValue(),
 		_title->shownValue()
-	) | rpl::start_with_next([=](
+	) | rpl::on_next([=](
 			QSize size,
 			int titleHeight,
 			bool titleShown) {
@@ -404,7 +404,7 @@ void WindowHelper::init() {
 			size.height() - (titleShown ? titleHeight : 0));
 	}, _body->lifetime());
 
-	_dpi.value() | rpl::start_with_next([=](uint dpi) {
+	_dpi.value() | rpl::on_next([=](uint dpi) {
 		updateMargins();
 	}, window()->lifetime());
 
@@ -438,7 +438,7 @@ void WindowHelper::init() {
 
 	window()->shownValue() | rpl::filter([=](bool shown) {
 		return _handle && !shown;
-	}) | rpl::start_with_next([=] {
+	}) | rpl::on_next([=] {
 		enableCloakingForHidden();
 	}, window()->lifetime());
 }
