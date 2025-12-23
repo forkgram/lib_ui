@@ -6,12 +6,15 @@
 //
 #pragma once
 
+#include "base/qt_connection.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/menu/menu.h"
 #include "ui/widgets/menu/menu_common.h"
 #include "styles/style_widgets.h"
 
 namespace Ui::Menu {
+
+class Menu;
 
 class ItemBase : public RippleButton {
 public:
@@ -32,12 +35,16 @@ public:
 
 	rpl::producer<CallbackData> clicks() const;
 
+	void setClickedCallback(Fn<void()> callback);
+
 	rpl::producer<int> minWidthValue() const;
 	int minWidth() const;
 	void setMinWidth(int w);
 
 	virtual void handleKeyPress(not_null<QKeyEvent*> e) {
 	}
+
+	void setMenuAsParent(not_null<Menu*> menu);
 
 	virtual not_null<QAction*> action() const = 0;
 	virtual bool isEnabled() const = 0;
@@ -52,11 +59,12 @@ protected:
 
 	virtual int contentHeight() const = 0;
 
-#ifdef Q_OS_UNIX
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
-#endif // Q_OS_UNIX
 
 private:
+	bool _mousePressed = false;
 	int _index = -1;
 
 	rpl::variable<bool> _selected = false;
@@ -65,6 +73,10 @@ private:
 	rpl::variable<int> _minWidth = 0;
 
 	TriggeredSource _lastTriggeredSource = TriggeredSource::Mouse;
+
+	base::qt_connection _connection;
+
+	Menu *_menu = nullptr;
 
 };
 
