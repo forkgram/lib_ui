@@ -227,6 +227,15 @@ void PopupMenu::init() {
 		}
 	}, paddingWrap->lifetime());
 
+	rpl::combine(
+		_scroll->scrollTopValue(),
+		_scroll->heightValue(),
+		_menu->heightValue()
+	) | rpl::on_next([=](int scrollTop, int scrollHeight, int) {
+		const auto scrollBottom = scrollTop + scrollHeight;
+		paddingWrap->setVisibleTopBottom(scrollTop, scrollBottom);
+	}, paddingWrap->lifetime());
+
 	_menu->scrollToRequests(
 	) | rpl::on_next([=](ScrollToRequest request) {
 		_scroll->scrollTo({
@@ -521,7 +530,9 @@ void PopupMenu::handleActivated(const Menu::CallbackData &data) {
 void PopupMenu::handleTriggered(const Menu::CallbackData &data) {
 	if (!popupSubmenuFromAction(data)) {
 		_triggering = true;
-		hideMenu();
+		if (!data.preventClose) {
+			hideMenu();
+		}
 		data.action->trigger();
 		_triggering = false;
 		if (_deleteLater) {

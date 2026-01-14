@@ -12,7 +12,7 @@
 namespace Ui::Menu {
 
 Separator::Separator(
-	not_null<RpWidget*> parent,
+	not_null<Menu*> parent,
 	const style::Menu &st,
 	const style::MenuSeparator &separator,
 	not_null<QAction*> action)
@@ -23,7 +23,7 @@ Separator::Separator(
 , _bg(st.itemBg)
 , _height(_padding.top() + _lineWidth + _padding.bottom())
 , _action(action) {
-	initResizeHook(parent->sizeValue());
+	fitToMenuWidth();
 	paintRequest(
 	) | rpl::on_next([=] {
 		Painter p(this);
