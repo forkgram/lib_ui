@@ -771,6 +771,43 @@ void String::setSpoilerLinkFilter(Fn<bool(const ClickContext&)> filter) {
 		std::move(filter));
 }
 
+bool String::hasCustomEmoji() const {
+	return _hasCustomEmoji;
+}
+
+void String::setCustomEmojiClickHandler(
+		Fn<bool(QStringView)> predicate,
+		Fn<void(QStringView, ClickContext)> callback) {
+	if (!_hasCustomEmoji) {
+		return;
+	}
+	const auto extended = ensureExtended();
+	uint16 handlerIndex = 0;
+	for (const auto &block : _blocks) {
+		if (block->type() == TextBlockType::CustomEmoji) {
+			const auto index = block->linkIndex();
+			if (index
+				&& (index > int(extended->links.size())
+					|| !extended->links[index - 1])) {
+				handlerIndex = index;
+				break;
+			}
+		}
+	}
+	if (!handlerIndex) {
+		return;
+	}
+	if (int(extended->links.size()) < handlerIndex) {
+		extended->links.resize(handlerIndex);
+	}
+	extended->customEmoji = std::make_unique<CustomEmojiData>();
+	const auto data = extended->customEmoji.get();
+	data->handlerIndex = handlerIndex;
+	data->predicate = std::move(predicate);
+	data->callback = std::move(callback);
+	data->link = std::make_shared<CustomEmojiClickHandler>(data);
+}
+
 void String::setBlockquoteExpandCallback(
 		Fn<void(int index, bool expanded)> callback) {
 	Expects(_extended && _extended->quotes);
@@ -1497,7 +1534,10 @@ void String::enumerateText(
 				return 0;
 			}
 			const auto result = (*i)->linkIndex();
-			return (result && _extended && _extended->links[result - 1])
+			return (result
+				&& _extended
+				&& result <= int(_extended->links.size())
+				&& _extended->links[result - 1])
 				? result
 				: 0;
 		}();

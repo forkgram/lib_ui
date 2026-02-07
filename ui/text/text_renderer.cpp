@@ -1402,10 +1402,21 @@ const AbstractBlock *Renderer::markBlockForElisionGetEnd(int blockIndex) {
 		_elideSavedIndex = blockIndex;
 		auto mutableText = const_cast<String*>(_t);
 		_elideSavedBlock = std::move(mutableText->_blocks[blockIndex]);
+		const auto elidedLinkIndex = (*_elideSavedBlock)->linkIndex();
+		const auto skipElideLinkIndex = elidedLinkIndex
+			&& ((*_elideSavedBlock)->type() == TextBlockType::CustomEmoji)
+			&& (!_t->_extended
+				|| (_t->_extended->links.size() < elidedLinkIndex)
+				|| !_t->_extended->links[elidedLinkIndex]
+				|| (_t->_extended->customEmoji
+					&& (_t->_extended->customEmoji->handlerIndex
+						== elidedLinkIndex)));
 		mutableText->_blocks[blockIndex] = Block::Text({
 			.position = (*_elideSavedBlock)->position(),
 			.flags = (*_elideSavedBlock)->flags(),
-			.linkIndex = (*_elideSavedBlock)->linkIndex(),
+			.linkIndex = (skipElideLinkIndex
+				? uint16()
+				: (*_elideSavedBlock)->linkIndex()),
 			.colorIndex = (*_elideSavedBlock)->colorIndex(),
 		});
 	}
@@ -1557,16 +1568,26 @@ void Renderer::applyBlockProperties(
 		QTextEngine &e,
 		not_null<const AbstractBlock*> block) {
 	const auto flags = block->flags();
+	const auto isCustomEmojiLink = [&](uint16 index) {
+		if (!index || block->type() != TextBlockType::CustomEmoji) {
+			return false;
+		}
+		return !_t->_extended
+			|| index > _t->_extended->links.size()
+			|| !_t->_extended->links[index - 1];
+	};
 	const auto usedFont = [&] {
 		if (const auto index = block->linkIndex()) {
+			if (isCustomEmojiLink(index)) {
+				return _t->_st->font;
+			}
 			const auto underline = _t->_st->linkUnderline;
 			const auto underlined = (underline == st::kLinkUnderlineNever)
 				? false
 				: (underline == st::kLinkUnderlineActive)
 				? ((_palette && _palette->linkAlwaysActive)
-					|| ClickHandler::showAsActive(_t->_extended
-						? _t->_extended->links[index - 1]
-						: nullptr))
+					|| ClickHandler::showAsActive(
+						_t->_extended->links[index - 1]))
 				: true;
 			return underlined ? _t->_st->font->underline() : _t->_st->font;
 		}
@@ -1590,17 +1611,17 @@ void Renderer::applyBlockProperties(
 		}
 		if (isMono
 			&& block->linkIndex()
+			&& !isCustomEmojiLink(block->linkIndex())
 			&& (!_background.spoiler || _spoiler->revealed)) {
-			const auto pressed = ClickHandler::showAsPressed(_t->_extended
-				? _t->_extended->links[block->linkIndex() - 1]
-				: nullptr);
+			const auto pressed = ClickHandler::showAsPressed(
+				_t->_extended->links[block->linkIndex() - 1]);
 			_background.selectActiveBlock = pressed;
 		}
 
 		if (const auto color = block->colorIndex()) {
 			if (color == 1) {
 				if (_quote && _quote->blockquote && _quoteBlockquoteCache) {
-					_quoteLinkPenOverride = QPen(_quoteBlockquoteCache->outlines[0]);
+					_quoteLinkPenOverride = QPen(_quoteBlockquoteCache->icon);
 					_currentPen = &_quoteLinkPenOverride;
 					_currentPenSelected = &_quoteLinkPenOverride;
 				} else {
@@ -1618,8 +1639,11 @@ void Renderer::applyBlockProperties(
 			_currentPen = &_palette->monoFg->p;
 			_currentPenSelected = &_palette->selectMonoFg->p;
 		} else if (block->linkIndex()) {
-			if (_quote && _quote->blockquote && _quoteBlockquoteCache) {
-				_quoteLinkPenOverride = QPen(_quoteBlockquoteCache->outlines[0]);
+			if (isCustomEmojiLink(block->linkIndex())) {
+				_currentPen = &_originalPen;
+				_currentPenSelected = &_originalPenSelected;
+			} else if (_quote && _quote->blockquote && _quoteBlockquoteCache) {
+				_quoteLinkPenOverride = QPen(_quoteBlockquoteCache->icon);
 				_currentPen = &_quoteLinkPenOverride;
 				_currentPenSelected = &_quoteLinkPenOverride;
 			} else {
@@ -1639,9 +1663,26 @@ ClickHandlerPtr Renderer::lookupLink(const AbstractBlock *block) const {
 		&& (block->flags() & TextBlockFlag::Spoiler))
 		? _spoiler->link
 		: ClickHandlerPtr();
-	return (spoilerLink || !block->linkIndex() || !_t->_extended)
-		? spoilerLink
-		: _t->_extended->links[block->linkIndex() - 1];
+	if (spoilerLink || !block->linkIndex() || !_t->_extended) {
+		return spoilerLink;
+	}
+	const auto index = block->linkIndex();
+	const auto customEmoji = _t->_extended->customEmoji.get();
+	if (customEmoji
+		&& customEmoji->link
+		&& index == customEmoji->handlerIndex
+		&& block->type() == TextBlockType::CustomEmoji) {
+		const auto customBlock = static_cast<const CustomEmojiBlock*>(block);
+		customEmoji->entityData = customBlock->custom()->entityData();
+		if (customEmoji->predicate && !customEmoji->predicate(customEmoji->entityData)) {
+			return nullptr;
+		}
+		return customEmoji->link;
+	}
+	if (index > _t->_extended->links.size()) {
+		return nullptr;
+	}
+	return _t->_extended->links[index - 1];
 }
 
 } // namespace Ui::Text
