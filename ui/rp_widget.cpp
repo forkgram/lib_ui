@@ -7,6 +7,7 @@
 #include "ui/rp_widget.h"
 
 #include "base/qt_signal_producer.h"
+#include "ui/accessible/ui_accessible_item.h"
 #include "ui/accessible/ui_accessible_widget.h"
 #include "ui/gl/gl_detection.h"
 
@@ -308,6 +309,8 @@ RpWidgetWrap::Initer::Initer(QWidget *parent, bool setZeroGeometry) {
 	}
 }
 
+RpWidgetWrap::Initer::~Initer() = default;
+
 void RpWidgetWrap::visibilityChangedHook(bool wasVisible, bool nowVisible) {
 	if (nowVisible != wasVisible) {
 		if (auto streams = _eventStreams.get()) {
@@ -327,6 +330,8 @@ void AccessibilityState::writeTo(QAccessible::State &state) {
 	state.checkable = checkable ? 1 : 0;
 	state.checked = checked ? 1 : 0;
 	state.pressed = pressed ? 1 : 0;
+	state.readOnly = readOnly ? 1 : 0;
+	state.selected = selected ? 1 : 0;
 }
 
 RpWidget::RpWidget(QWidget *parent)
@@ -355,6 +360,80 @@ QAccessibleInterface *RpWidget::accessibilityCreate() {
 
 QAccessible::Role RpWidget::accessibilityRole() {
 	return QAccessible::Role::NoRole;
+}
+
+QAccessible::Role RpWidget::accessibilityChildRole() const {
+	return QAccessible::Role::NoRole;
+}
+
+QString RpWidget::accessibilityChildName(int index) const {
+	return QString();
+}
+
+QString RpWidget::accessibilityChildDescription(int index) const {
+	return QString();
+}
+
+QString RpWidget::accessibilityChildValue(int index) const {
+	return QString();
+}
+
+QAccessible::State RpWidget::accessibilityChildState(int index) const {
+	return QAccessible::State();
+}
+
+QRect RpWidget::accessibilityChildRect(int index) const {
+	return QRect();
+}
+
+int RpWidget::accessibilityChildColumnCount(int row) const {
+	return 0;
+}
+
+QAccessible::Role RpWidget::accessibilityChildSubItemRole() const {
+	return QAccessible::StaticText;
+}
+
+QString RpWidget::accessibilityChildSubItemName(int row, int column) const {
+	return QString();
+}
+
+QString RpWidget::accessibilityChildSubItemValue(int row, int column) const {
+	return QString();
+}
+
+void RpWidget::accessibilityChildNameChanged(int index) {
+	QAccessibleEvent event(this, QAccessible::NameChanged);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildDescriptionChanged(int index) {
+	QAccessibleEvent event(this, QAccessible::DescriptionChanged);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildValueChanged(int index) {
+	QAccessibleEvent event(this, QAccessible::ValueChanged);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildStateChanged(
+		int index,
+		AccessibilityState changes) {
+	auto fields = QAccessible::State();
+	changes.writeTo(fields);
+	QAccessibleStateChangeEvent event(this, fields);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
+}
+
+void RpWidget::accessibilityChildFocused(int index) {
+	QAccessibleEvent event(this, QAccessible::Focus);
+	event.setChild(index);
+	QAccessible::updateAccessibility(&event);
 }
 
 QString RpWidget::accessibilityName() {
@@ -400,6 +479,35 @@ QStringList RpWidget::accessibilityActionNames() {
 }
 
 void RpWidget::accessibilityDoAction(const QString &name) {
+}
+
+int RpWidget::accessibilityChildCount() const {
+	return -1;
+}
+
+RpWidget *RpWidget::accessibilityParent() const {
+	return nullptr;
+}
+
+QAccessibleInterface *RpWidget::accessibilityChildInterface(
+		int index) const {
+	const auto count = accessibilityChildCount();
+	if (count < 0 || index < 0 || index >= count) {
+		return nullptr;
+	}
+	auto &items = accessibleItems();
+	auto &ids = items.list;
+	if (int(ids.size()) < count) {
+		ids.resize(count);
+	}
+	if (!ids[index]) {
+		ids[index] = Accessible::UniqueId(
+			QAccessible::registerAccessibleInterface(
+				new Accessible::Item(
+					const_cast<RpWidget*>(this),
+					index)));
+	}
+	return ids[index].get();
 }
 
 } // namespace Ui

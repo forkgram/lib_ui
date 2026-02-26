@@ -36,6 +36,10 @@ public:
 	Menu(QWidget *parent, QMenu *menu, const style::Menu &st = st::defaultMenu);
 	~Menu();
 
+	QAccessible::Role accessibilityRole() override {
+		return QAccessible::Role::PopupMenu;
+	}
+
 	[[nodiscard]] const style::Menu &st() const {
 		return _st;
 	}
