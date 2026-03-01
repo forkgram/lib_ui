@@ -18,6 +18,7 @@
 #include "ui/integration.h"
 #include "base/invoke_queued.h"
 #include "base/platform/base_platform_info.h"
+#include "base/screen_reader_state.h"
 
 #include <QtGui/QtEvents>
 #include <QtGui/QPainter>
@@ -199,6 +200,14 @@ PopupMenu::PopupMenu(QWidget *parent, QMenu *menu, const style::PopupMenu &st)
 }
 
 void PopupMenu::init() {
+	const auto reader = base::ScreenReaderState::Instance();
+	if (reader->active()) {
+		setFocusPolicy(Qt::ClickFocus);
+	}
+	reader->activeValue(
+	) | rpl::on_next([=](bool active) {
+		setFocusPolicy(active ? Qt::ClickFocus : Qt::NoFocus);
+	}, lifetime());
 	using namespace rpl::mappers;
 
 	Integration::Instance().forcePopupMenuHideRequests(
@@ -571,6 +580,8 @@ void PopupMenu::popupSubmenu(
 			: QMargins(st::lineWidth, 0, st::lineWidth, 0);
 		QPoint p(_inner.x() + (style::RightToLeft() ? padding.right() : (_inner.width() - padding.left())), _inner.y() + actionTop);
 		_activeSubmenu = submenu;
+		_activeSubmenu->menu()->clearSelection();
+		_activeSubmenu->setAccessibleName(action->text());
 		if (_activeSubmenu->prepareGeometryFor(geometry().topLeft() + p, this)) {
 			_activeSubmenu->showPrepared(source);
 			_menu->setChildShownAction(action);
@@ -631,7 +642,9 @@ void PopupMenu::handleMouseRelease(QPoint globalPosition) {
 }
 
 void PopupMenu::focusOutEvent(QFocusEvent *e) {
-	hideMenu();
+	if (!InFocusChain(this)) {
+		hideMenu();
+	}
 }
 
 void PopupMenu::hideEvent(QHideEvent *e) {
@@ -1138,11 +1151,19 @@ void PopupMenu::showPrepared(TriggeredSource source) {
 	Platform::ShowOverAll(this);
 	raise();
 	activateWindow();
-	_menu->setShowSource(source);
+	if (base::ScreenReaderState::Instance()->active()) {
+		_menu->setShowSource(TriggeredSource::Keyboard);
+	} else {
+		_menu->setShowSource(source);
+	}
 }
 
 void PopupMenu::setClearLastSeparator(bool clear) {
 	_clearLastSeparator = clear;
+}
+
+RpWidget *PopupMenu::accessibilityParent() const {
+	return qobject_cast<RpWidget*>(parentWidget());
 }
 
 PopupMenu::~PopupMenu() {

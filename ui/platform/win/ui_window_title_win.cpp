@@ -45,13 +45,17 @@ HRESULT(__stdcall *GetScaleFactorForMonitor)(
 } // namespace
 
 std::shared_ptr<TitleControlsLayout> TitleControlsLayout::Create() {
+	const auto supportsOnTopControl = ::Platform::IsWindows8OrGreater();
+	auto right = std::vector<TitleControls::Control>{
+		TitleControls::Control::Minimize,
+		TitleControls::Control::Maximize,
+		TitleControls::Control::Close,
+	};
+	if (supportsOnTopControl) {
+		right.insert(begin(right), TitleControls::Control::OnTop);
+	}
 	return std::shared_ptr<TitleControlsLayout>(new TitleControlsLayout({
-		.right = {
-			TitleControls::Control::OnTop,
-			TitleControls::Control::Minimize,
-			TitleControls::Control::Maximize,
-			TitleControls::Control::Close,
-		}
+		.right = std::move(right),
 	}));
 }
 

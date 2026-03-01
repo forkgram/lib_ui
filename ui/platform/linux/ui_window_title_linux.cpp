@@ -6,6 +6,7 @@
 //
 #include "ui/platform/linux/ui_window_title_linux.h"
 
+#include "base/platform/base_platform_info.h"
 #include "base/platform/linux/base_linux_xdp_utilities.h"
 
 #include "base/integration.h"
@@ -53,7 +54,8 @@ TitleControlsLayoutImpl::TitleControlsLayoutImpl()
 }) {}
 
 TitleControls::Layout TitleControlsLayoutImpl::Get() {
-	const auto convert = [](const QString &keywords) {
+	const auto supportsOnTopControl = !::Platform::IsWayland();
+	const auto convert = [&](const QString &keywords) {
 		const auto toControl = [](const QString &keyword) {
 			if (keyword == qstr("minimize")) {
 				return TitleControls::Control::Minimize;
@@ -78,11 +80,15 @@ TitleControls::Layout TitleControlsLayoutImpl::Get() {
 				splitted[1].split(','),
 				ranges::back_inserter(result.right),
 				toControl);
-			result.right.insert(
-				begin(result.right),
-				TitleControls::Control::OnTop);
+			if (supportsOnTopControl) {
+				result.right.insert(
+					begin(result.right),
+					TitleControls::Control::OnTop);
+			}
 		} else {
-			result.left.push_back(TitleControls::Control::OnTop);
+			if (supportsOnTopControl) {
+				result.left.push_back(TitleControls::Control::OnTop);
+			}
 		}
 
 		return result;
@@ -129,13 +135,16 @@ TitleControls::Layout TitleControlsLayoutImpl::Get() {
 		return *portalResult;
 	}
 
+	auto right = std::vector<TitleControls::Control>{
+		TitleControls::Control::Minimize,
+		TitleControls::Control::Maximize,
+		TitleControls::Control::Close,
+	};
+	if (supportsOnTopControl) {
+		right.insert(begin(right), TitleControls::Control::OnTop);
+	}
 	return TitleControls::Layout{
-		.right = {
-			TitleControls::Control::OnTop,
-			TitleControls::Control::Minimize,
-			TitleControls::Control::Maximize,
-			TitleControls::Control::Close,
-		}
+		.right = std::move(right),
 	};
 }
 
