@@ -12,6 +12,7 @@
 #include "base/invoke_queued.h"
 #include "base/qthelp_regex.h"
 #include "base/random.h"
+#include "ui/platform/ui_platform_utility.h"
 #include "emoji_suggestions_helper.h"
 #include "ui/text/text.h"
 #include "ui/text/text_renderer.h" // kQuoteCollapsedLines
@@ -37,6 +38,8 @@
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QTextEdit>
 #include <QShortcut>
+
+#include <crl/crl_async.h>
 
 namespace Ui {
 namespace {
@@ -1533,6 +1536,9 @@ InputField::InputField(
 , _inner(std::make_unique<Inner>(this))
 , _lastTextWithTags(value)
 , _placeholderFull(std::move(placeholder)) {
+#ifdef Q_OS_MAC
+	_systemTextReplaces = std::make_unique<SystemTextReplaces>();
+#endif
 	_inner->setDocument(CreateChild<InputDocument>(_inner.get(), _st));
 	_inner->setAcceptRichText(false);
 	resize(_st.width, _minHeight);
@@ -1603,11 +1609,6 @@ InputField::InputField(
 
 	_inner->setContentsMargins(0, 0, 0, 0);
 	_inner->document()->setDocumentMargin(0);
-
-	setAttribute(Qt::WA_AcceptTouchEvents);
-	_inner->viewport()->setAttribute(Qt::WA_AcceptTouchEvents);
-
-	_touchTimer.setCallback([=] { _touchRightButton = true; });
 
 	base::qt_signal_producer(
 		_inner->document(),
@@ -1786,16 +1787,7 @@ void InputField::setBlockquoteCache(
 }
 
 bool InputField::viewportEventInner(QEvent *e) {
-	if (e->type() == QEvent::TouchBegin
-		|| e->type() == QEvent::TouchUpdate
-		|| e->type() == QEvent::TouchEnd
-		|| e->type() == QEvent::TouchCancel) {
-		const auto ev = static_cast<QTouchEvent*>(e);
-		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
-			handleTouchEvent(ev);
-			return false;
-		}
-	} else if (e->type() == QEvent::Paint && _customObject) {
+	if (e->type() == QEvent::Paint && _customObject) {
 		_customObject->setNow(crl::now());
 	}
 	return _inner->QTextEdit::viewportEvent(e);
@@ -1864,12 +1856,21 @@ void InputField::setInstantReplaces(const InstantReplaces &replaces) {
 	_mutableInstantReplaces = replaces;
 }
 
-void InputField::setInstantReplacesEnabled(rpl::producer<bool> enabled) {
+void InputField::setInstantReplacesEnabled(
+		rpl::producer<bool> enabled,
+		rpl::producer<bool> systemTextReplacesEnabled) {
 	std::move(
 		enabled
 	) | rpl::on_next([=](bool value) {
 		_instantReplacesEnabled = value;
 	}, lifetime());
+	if (systemTextReplacesEnabled) {
+		std::move(
+			systemTextReplacesEnabled
+		) | rpl::on_next([=](bool value) {
+			_systemTextReplacesEnabled = value;
+		}, lifetime());
+	}
 }
 
 void InputField::setMarkdownReplacesEnabled(bool enabled) {
@@ -2168,6 +2169,11 @@ void InputField::paintQuotes(QPaintEvent *e) {
 	}
 }
 
+void InputField::setPlaceholderColorOverride(const style::color &color) {
+	_placeholderFgOverride = color;
+	update();
+}
+
 void InputField::setDocumentMargin(float64 margin) {
 	_settingDocumentMargin = true;
 	document()->setDocumentMargin(margin);
@@ -2332,71 +2338,6 @@ void InputField::checkContentHeight() {
 	}
 }
 
-void InputField::handleTouchEvent(QTouchEvent *e) {
-	switch (e->type()) {
-	case QEvent::TouchBegin: {
-		if (_touchPress || e->touchPoints().isEmpty()) {
-			return;
-		}
-		_touchTimer.callOnce(QApplication::startDragTime());
-		_touchPress = true;
-		_touchMove = _touchRightButton = false;
-		_touchStart = e->touchPoints().cbegin()->screenPos().toPoint();
-	} break;
-
-	case QEvent::TouchUpdate: {
-		if (!e->touchPoints().isEmpty()) {
-			touchUpdate(e->touchPoints().cbegin()->screenPos().toPoint());
-		}
-	} break;
-
-	case QEvent::TouchEnd: {
-		touchFinish();
-	} break;
-
-	case QEvent::TouchCancel: {
-		_touchPress = false;
-		_touchTimer.cancel();
-	} break;
-	}
-}
-
-void InputField::touchUpdate(QPoint globalPosition) {
-	if (_touchPress
-		&& !_touchMove
-		&& ((globalPosition - _touchStart).manhattanLength()
-			>= QApplication::startDragDistance())) {
-		_touchMove = true;
-	}
-}
-
-void InputField::touchFinish() {
-	if (!_touchPress) {
-		return;
-	}
-	const auto weak = base::make_weak(this);
-	if (!_touchMove && window()) {
-		QPoint mapped(mapFromGlobal(_touchStart));
-
-		if (_touchRightButton) {
-			QContextMenuEvent contextEvent(
-				QContextMenuEvent::Mouse,
-				mapped,
-				_touchStart);
-			contextMenuEvent(&contextEvent);
-		} else {
-			QGuiApplication::inputMethod()->show();
-		}
-	}
-	if (weak) {
-		_touchTimer.cancel();
-		_touchPress
-			= _touchMove
-			= _touchRightButton
-			= _mousePressedInTouch = false;
-	}
-}
-
 void InputField::paintSurrounding(
 		QPainter &p,
 		QRect clip,
@@ -2465,12 +2406,9 @@ void InputField::paintEvent(QPaintEvent *e) {
 	const auto focusedDegree = _a_focused.value(_focused ? 1. : 0.);
 	paintSurrounding(p, r, errorDegree, focusedDegree);
 
-	const auto skip = int(base::SafeRound(_inner->document()->documentMargin()));
-	const auto margins = _st.textMargins
-		+ _st.placeholderMargins
-		+ QMargins(skip, skip + _placeholderCustomFontSkip, skip, 0)
-		+ _additionalMargins
-		+ _customFontMargins;
+	const auto margins = fullTextMargins()
+		+ QMargins(0, _placeholderCustomFontSkip, 0, 0)
+		+ _st.placeholderMargins;
 
 	if (_st.placeholderScale > 0. && !_placeholderPath.isEmpty()) {
 		auto placeholderShiftDegree = _a_placeholderShifted.value(_placeholderShifted ? 1. : 0.);
@@ -2484,8 +2422,11 @@ void InputField::paintEvent(QPaintEvent *e) {
 		if (style::RightToLeft()) r.moveLeft(width() - r.left() - r.width());
 
 		auto placeholderScale = 1. - (1. - _st.placeholderScale) * placeholderShiftDegree;
-		auto placeholderFg = anim::color(_st.placeholderFg, _st.placeholderFgActive, focusedDegree);
-		placeholderFg = anim::color(placeholderFg, _st.placeholderFgError, errorDegree);
+		const auto &phFg = _placeholderFgOverride.value_or(_st.placeholderFg);
+		const auto &phFgActive = _placeholderFgOverride.value_or(_st.placeholderFgActive);
+		const auto &phFgError = _placeholderFgOverride.value_or(_st.placeholderFgError);
+		auto placeholderFg = anim::color(phFg, phFgActive, focusedDegree);
+		placeholderFg = anim::color(placeholderFg, phFgError, errorDegree);
 
 		PainterHighQualityEnabler hq(p);
 		p.setPen(Qt::NoPen);
@@ -2505,7 +2446,9 @@ void InputField::paintEvent(QPaintEvent *e) {
 			const auto placeholderLeft = anim::interpolate(0, -_st.placeholderShift, placeholderHiddenDegree);
 
 			p.setFont(_st.placeholderFont);
-			p.setPen(anim::pen(_st.placeholderFg, _st.placeholderFgActive, focusedDegree));
+			const auto &phFg2 = _placeholderFgOverride.value_or(_st.placeholderFg);
+			const auto &phFgActive2 = _placeholderFgOverride.value_or(_st.placeholderFgActive);
+			p.setPen(anim::pen(phFg2, phFgActive2, focusedDegree));
 			if (_st.placeholderAlign == style::al_topleft && _placeholderAfterSymbols > 0) {
 				const auto skipWidth = placeholderSkipWidth();
 				p.drawText(
@@ -2571,14 +2514,9 @@ void InputField::mousePressEvent(QMouseEvent *e) {
 }
 
 void InputField::mousePressEventInner(QMouseEvent *e) {
-	if (_touchPress && e->button() == Qt::LeftButton) {
-		_mousePressedInTouch = true;
-		_touchStart = e->globalPos();
-	} else {
-		_selectedActionQuoteId = lookupActionQuoteId(e->pos());
-		_pressedActionQuoteId = _selectedActionQuoteId;
-		updateCursorShape();
-	}
+	_selectedActionQuoteId = lookupActionQuoteId(e->pos());
+	_pressedActionQuoteId = _selectedActionQuoteId;
+	updateCursorShape();
 	if (_pressedActionQuoteId <= 0) {
 		_inner->QTextEdit::mousePressEvent(e);
 	}
@@ -2711,17 +2649,10 @@ void InputField::mouseReleaseEventInner(QMouseEvent *e) {
 		blockActionClicked(taken);
 	}
 	updateCursorShape();
-	if (_mousePressedInTouch) {
-		touchFinish();
-	} else {
-		_inner->QTextEdit::mouseReleaseEvent(e);
-	}
+	_inner->QTextEdit::mouseReleaseEvent(e);
 }
 
 void InputField::mouseMoveEventInner(QMouseEvent *e) {
-	if (_mousePressedInTouch) {
-		touchUpdate(e->globalPos());
-	}
 	_selectedActionQuoteId = lookupActionQuoteId(e->pos());
 	updateCursorShape();
 	_inner->QTextEdit::mouseMoveEvent(e);
@@ -3073,7 +3004,7 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 	const auto insertedTagsProcessor = _insertedTagsAreFromMime
 		? (_tagMimeProcessor ? _tagMimeProcessor : DefaultTagMimeProcessor)
 		: nullptr;
-	const auto breakTagOnNotLetterTill = ProcessInsertedTags(
+	auto breakTagOnNotLetterTill = ProcessInsertedTags(
 		_st,
 		document,
 		insertPosition,
@@ -3431,10 +3362,13 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 						action.customEmojiLink);
 				}
 				insertPosition = action.intervalStart + 1;
-				if (insertEnd >= action.intervalEnd) {
-					insertEnd -= action.intervalEnd
-						- action.intervalStart
-						- 1;
+				insertEnd = insertPosition
+					+ std::max(insertEnd - action.intervalEnd, 0);
+				if (breakTagOnNotLetterTill > action.intervalStart) {
+					breakTagOnNotLetterTill = insertPosition
+						+ std::max(
+							breakTagOnNotLetterTill - action.intervalEnd,
+							0);
 				}
 			} else if (action.type == ActionType::RemoveTag) {
 				RemoveDocumentTags(
@@ -3685,6 +3619,15 @@ void InputField::highlightMarkdown() {
 	if (const auto till = cursor.position(); till > from) {
 		applyColor(from, till, QColor(0, 0, 0));
 	}
+}
+
+QMargins InputField::fullTextMargins() const {
+	const auto skip = int(base::SafeRound(
+		_inner->document()->documentMargin()));
+	return _st.textMargins
+		+ QMargins(skip, skip, skip, 0)
+		+ _additionalMargins
+		+ _customFontMargins;
 }
 
 void InputField::setDisplayFocused(bool focused) {
@@ -3976,7 +3919,7 @@ bool InputField::ShouldSubmit(
 void InputField::keyPressEventInner(QKeyEvent *e) {
 	const auto shift = e->modifiers().testFlag(Qt::ShiftModifier);
 	const auto alt = e->modifiers().testFlag(Qt::AltModifier);
-	const auto macmeta = Platform::IsMac()
+	const auto macmeta = ::Platform::IsMac()
 		&& e->modifiers().testFlag(Qt::ControlModifier)
 		&& !e->modifiers().testFlag(Qt::MetaModifier)
 		&& !e->modifiers().testFlag(Qt::AltModifier);
@@ -4155,6 +4098,7 @@ void InputField::keyPressEventInner(QKeyEvent *e) {
 		if (!processMarkdownReplaces(text)) {
 			processInstantReplaces(text);
 		}
+		processSystemTextReplaces(text);
 	}
 }
 
@@ -4412,6 +4356,7 @@ void InputField::inputMethodEventInner(QInputMethodEvent *e) {
 		if (!processMarkdownReplaces(text)) {
 			processInstantReplaces(text);
 		}
+		processSystemTextReplaces(text);
 	}
 }
 
@@ -4495,6 +4440,98 @@ void InputField::processInstantReplaces(const QString &appended) {
 		}
 		node = &it->second;
 	} while (true);
+}
+
+void InputField::processSystemTextReplaces(const QString &appended) {
+	if (!_systemTextReplacesEnabled
+		|| !_systemTextReplaces
+		|| appended.size() != 1
+		|| appended[0].isLetterOrNumber()) {
+		return;
+	}
+	const auto position = textCursor().position();
+	if (position < 2) {
+		return;
+	}
+	for (const auto &tag : _lastMarkdownTags) {
+		if (tag.internalStart < position
+			&& tag.internalStart + tag.internalLength >= position
+			&& (tag.tag == kTagCode || IsTagPre(tag.tag))) {
+			return;
+		}
+	}
+	const auto lookBack = std::min(position - 1, 100);
+	const auto from = position - 1 - lookBack;
+	auto selectCursor = textCursor();
+	selectCursor.setPosition(from);
+	selectCursor.setPosition(position - 1, QTextCursor::KeepAnchor);
+	const auto textBefore = selectCursor.selectedText();
+	if (textBefore.isEmpty()) {
+		return;
+	}
+
+	auto endAnchor = textCursor();
+	endAnchor.setPosition(position - 1);
+
+	const auto id = ++_systemTextReplaces->nextId;
+	_systemTextReplaces->pending.push_back({
+		.id = id,
+		.endAnchor = endAnchor,
+		.textSent = textBefore,
+	});
+
+	const auto weak = base::make_weak(this);
+	crl::async([text = textBefore, weak, id] {
+		const auto result = Platform::FindSystemTextReplace(text);
+		crl::on_main(weak, [=] {
+			weak->applySystemTextReplace(
+				id,
+				result.length,
+				result.replacement);
+		});
+	});
+}
+
+void InputField::applySystemTextReplace(
+		uint64 id,
+		int matchLength,
+		const QString &replacement) {
+	if (!_systemTextReplaces) {
+		return;
+	}
+	const auto it = ranges::find(
+		_systemTextReplaces->pending,
+		id,
+		&SystemTextReplaces::PendingCheck::id);
+	if (it == end(_systemTextReplaces->pending)) {
+		return;
+	}
+	const auto pending = *it;
+	_systemTextReplaces->pending.erase(it);
+
+	if (matchLength <= 0) {
+		return;
+	}
+	const auto anchorPos = pending.endAnchor.position();
+	const auto from = anchorPos - matchLength;
+	if (from < 0) {
+		return;
+	}
+	const auto till = anchorPos;
+	const auto original = pending.textSent.mid(
+		pending.textSent.size() - matchLength);
+	auto sanitized = replacement;
+	if (_mode != Mode::MultiLine) {
+		sanitized.replace('\n', ' ');
+		sanitized.replace('\r', ' ');
+	}
+	commitInstantReplacement(
+		from,
+		till,
+		sanitized,
+		QString(),
+		original,
+		true);
 }
 
 void InputField::applyInstantReplace(

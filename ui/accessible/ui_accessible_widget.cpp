@@ -8,10 +8,10 @@
 
 #include "base/debug_log.h"
 #include "base/integration.h"
-#include "base/screen_reader_state.h"
 #include "base/timer.h"
 #include "ui/accessible/ui_accessible_item.h"
 #include "ui/rp_widget.h"
+#include "ui/screen_reader_mode.h"
 
 #include <algorithm>
 
@@ -38,28 +38,26 @@ private:
 };
 
 FocusManager::FocusManager() : _cleanupTimer([=] { cleanup(); }) {
-	base::ScreenReaderState::Instance()->activeValue(
+	Ui::ScreenReaderModeActiveValue(
 	) | rpl::on_next([=](bool active) {
 		_active = active;
 		LOG(("Screen Reader: %1").arg(active ? "active" : "inactive"));
 
 		cleanup();
 		for (const auto &widget : _widgets) {
-			widget->setFocusPolicy(active ? Qt::TabFocus : Qt::NoFocus);
+			widget->setFocusPolicy(active
+				? widget->accessibilityFocusPolicy()
+				: Qt::NoFocus);
 		}
 	}, _lifetime);
 }
 
 void FocusManager::registerWidget(not_null<RpWidget*> widget) {
-	const auto role = widget->accessibilityRole();
-	if (role != QAccessible::Role::Button
-		&& role != QAccessible::Role::Link
-		&& role != QAccessible::Role::CheckBox
-		&& role != QAccessible::Role::Slider) {
+	const auto policy = widget->accessibilityFocusPolicy();
+	if (policy == Qt::NoFocus) {
 		return;
-	}
-	if (_active) {
-		widget->setFocusPolicy(Qt::TabFocus);
+	} else if (_active) {
+		widget->setFocusPolicy(policy);
 	}
 	_widgets.push_back(widget.get());
 	if (!_cleanupTimer.isActive()) {

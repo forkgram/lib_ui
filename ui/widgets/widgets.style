@@ -197,6 +197,12 @@ ScrollArea {
 	hiding: int;
 }
 
+BoxShadow {
+	blurRadius: pixels;
+	offset: point;
+	opacity: double;
+}
+
 Shadow {
 	left: icon;
 	topLeft: icon;
@@ -221,7 +227,7 @@ PanelAnimation {
 	fadeHeight: double;
 	fadeOpacity: double;
 	fadeBg: color;
-	shadow: Shadow;
+	shadow: BoxShadow;
 }
 
 MenuSeparator {
@@ -260,7 +266,8 @@ Menu {
 }
 
 PopupMenu {
-	shadow: Shadow;
+	shadow: BoxShadow;
+	shadowFallback: color;
 	scrollPadding: margins;
 	maxHeight: pixels;
 	animation: PanelAnimation;
@@ -270,6 +277,19 @@ PopupMenu {
 	radius: pixels;
 	duration: int;
 	showDuration: int;
+}
+
+PillTabs {
+	height: pixels;
+	margin: pixels;
+	borderWidth: pixels;
+	textStyle: TextStyle;
+	fg: color;
+	fgActive: color;
+	bg: color;
+	bgActive: color;
+	bgBorder: color;
+	duration: int;
 }
 
 InputField {
@@ -626,8 +646,6 @@ SideBarButton {
 
 Toast {
 	style: TextStyle;
-	icon: icon;
-	iconPosition: point;
 	palette: TextPalette;
 	padding: margins;
 	margin: margins;
@@ -907,6 +925,11 @@ defaultRoundShadow: Shadow {
 defaultEmptyShadow: Shadow {
 	fallback: windowBg;
 }
+defaultBoxShadow: BoxShadow {
+	blurRadius: 5px;
+	offset: point(0px, 1px);
+	opacity: 0.25;
+}
 roundShadowRadius8px: Shadow {
 	left: icon {{ "round_shadow_box_left", windowShadowFg }};
 	topLeft: icon {{ "round_shadow_box_top_left", windowShadowFg }};
@@ -931,7 +954,7 @@ defaultPanelAnimation: PanelAnimation {
 	fadeHeight: 0.2;
 	fadeOpacity: 1.0;
 	fadeBg: menuBg;
-	shadow: roundShadowRadius8px;
+	shadow: defaultBoxShadow;
 }
 
 defaultMenuArrow: icon {{ "menu/submenu_arrow", windowBoldFg }};
@@ -975,7 +998,8 @@ defaultMenu: Menu {
 	ripple: defaultRippleAnimation;
 }
 defaultPopupMenu: PopupMenu {
-	shadow: roundShadowRadius8px;
+	shadow: defaultBoxShadow;
+	shadowFallback: windowShadowFgFallback;
 	animation: defaultPanelAnimation;
 
 	scrollPadding: margins(0px, 8px, 0px, 8px);
@@ -986,6 +1010,30 @@ defaultPopupMenu: PopupMenu {
 	radius: 8px;
 	duration: 150;
 	showDuration: 200;
+}
+
+defaultPillTabs: PillTabs {
+	height: 36px;
+	margin: 4px;
+	borderWidth: 2px;
+	textStyle: semiboldTextStyle;
+	fg: windowSubTextFg;
+	fgActive: windowActiveTextFg;
+	bg: transparent;
+	bgActive: windowBgOver;
+	bgBorder: windowBgOver;
+	duration: 300;
+}
+
+popupMenuPillTabs: PillTabs(defaultPillTabs) {
+	height: 28px;
+	margin: 9px;
+	borderWidth: 3px;
+	fg: windowSubTextFg;
+	fgActive: windowFg;
+	bg: windowBg;
+	bgActive: windowBgOver;
+	bgBorder: windowBg;
 }
 
 boxTextStyle: TextStyle(defaultTextStyle) {
@@ -1224,7 +1272,6 @@ defaultInnerDropdown: InnerDropdown {
 	shadow: roundShadowRadius8px;
 	animation: PanelAnimation(defaultPanelAnimation) {
 		startHeight: 0.5;
-		shadow: roundShadowRadius8px;
 	}
 
 	duration: 150;
@@ -1507,6 +1554,8 @@ defaultToastPalette: TextPalette(defaultTextPalette) {
 	linkFg: mediaviewTextLinkFg;
 	monoFg: mediaviewCaptionFg;
 }
+defaultToastLottieSize: size(32px, 32px);
+defaultToastIconPadding: margins(12px, 2px, 12px, 2px);
 defaultToast: Toast {
 	style: defaultTextStyle;
 	palette: defaultToastPalette;

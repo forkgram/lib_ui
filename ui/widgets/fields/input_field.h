@@ -23,7 +23,6 @@
 class QMenu;
 class QShortcut;
 class QTextEdit;
-class QTouchEvent;
 class QContextMenuEvent;
 class Painter;
 
@@ -253,12 +252,16 @@ public:
 		std::shared_ptr<QContextMenuEvent> event;
 	};
 
+	void setPlaceholderColorOverride(const style::color &color);
+
 	void setDocumentMargin(float64 margin);
 	void setAdditionalMargin(int margin);
 	void setAdditionalMargins(QMargins margins);
 
 	void setInstantReplaces(const InstantReplaces &replaces);
-	void setInstantReplacesEnabled(rpl::producer<bool> enabled);
+	void setInstantReplacesEnabled(
+		rpl::producer<bool> enabled,
+		rpl::producer<bool> systemTextReplacesEnabled = {});
 	void setMarkdownReplacesEnabled(bool enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<MarkdownEnabledState> enabled);
 	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
@@ -285,6 +288,7 @@ public:
 		int afterSymbols = 0);
 	void setPlaceholderHidden(bool forcePlaceholderHidden);
 	void setDisplayFocused(bool focused);
+	[[nodiscard]] QMargins fullTextMargins() const;
 	void finishAnimating();
 	void setFocusFast() {
 		setDisplayFocused(true);
@@ -402,7 +406,6 @@ private:
 	void handleContentsChanged();
 	void updateRootFrameFormat();
 	bool viewportEventInner(QEvent *e);
-	void handleTouchEvent(QTouchEvent *e);
 
 	void updatePalette();
 	void refreshPlaceholder(const QString &text);
@@ -479,6 +482,11 @@ private:
 	const InstantReplaces &instantReplaces() const;
 	void processInstantReplaces(const QString &appended);
 	void applyInstantReplace(const QString &what, const QString &with);
+	void processSystemTextReplaces(const QString &appended);
+	void applySystemTextReplace(
+		uint64 id,
+		int matchLength,
+		const QString &replacement);
 
 	struct EditLinkData {
 		int from = 0;
@@ -546,10 +554,8 @@ private:
 		TextRange range);
 	void trippleEnterExitBlock(QTextCursor &cursor);
 
-	void touchUpdate(QPoint globalPosition);
-	void touchFinish();
-
 	const style::InputField &_st;
+	std::optional<style::color> _placeholderFgOverride;
 	Fn<not_null<Ui::Text::QuotePaintCache*>()> _preCache;
 	Fn<not_null<Ui::Text::QuotePaintCache*>()> _blockquoteCache;
 
@@ -632,13 +638,6 @@ private:
 	bool _focused = false;
 	bool _error = false;
 
-	base::Timer _touchTimer;
-	bool _touchPress = false;
-	bool _touchRightButton = false;
-	bool _touchMove = false;
-	bool _mousePressedInTouch = false;
-	QPoint _touchStart;
-
 	bool _correcting = false;
 	MimeDataHook _mimeDataHook;
 	rpl::event_stream<bool> _menuShownChanges;
@@ -652,6 +651,18 @@ private:
 
 	InstantReplaces _mutableInstantReplaces;
 	bool _instantReplacesEnabled = true;
+
+	struct SystemTextReplaces {
+		struct PendingCheck {
+			uint64 id = 0;
+			QTextCursor endAnchor;
+			QString textSent;
+		};
+		std::vector<PendingCheck> pending;
+		uint64 nextId = 0;
+	};
+	std::unique_ptr<SystemTextReplaces> _systemTextReplaces;
+	bool _systemTextReplacesEnabled = true;
 
 	rpl::event_stream<DocumentChangeInfo> _documentContentsChanges;
 	rpl::event_stream<MarkdownTag> _markdownTagApplies;
