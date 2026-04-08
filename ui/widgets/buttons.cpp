@@ -312,7 +312,7 @@ RoundButton::RoundButton(
 	}, lifetime());
 }
 
-void RoundButton::setTextTransform(TextTransform transform) {
+void RoundButton::setTextTransform(RoundButtonTextTransform transform) {
 	_transform = transform;
 	resizeToText(_textFull.current());
 }
@@ -410,7 +410,7 @@ void RoundButton::setCornerRadii(
 }
 
 void RoundButton::resizeToText(const TextWithEntities &text) {
-	if (_transform == TextTransform::ToUpper) {
+	if (_transform == RoundButtonTextTransform::ToUpper) {
 		_text.setMarkedText(
 			_st.style,
 			{ text.text.toUpper(), text.entities },

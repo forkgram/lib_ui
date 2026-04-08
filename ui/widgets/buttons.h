@@ -135,12 +135,19 @@ private:
 
 };
 
+enum class RoundButtonTextTransform : uchar {
+	NoTransform,
+	ToUpper,
+};
+
 class RoundButton : public RippleButton {
 public:
 	RoundButton(
 		QWidget *parent,
 		rpl::producer<QString> text,
 		const style::RoundButton &st);
+
+	void setTextTransform(RoundButtonTextTransform transform);
 
 	QString accessibilityName() override {
 		return _textFull.current().text;
@@ -178,12 +185,6 @@ public:
 		int bottomLeft,
 		int bottomRight);
 
-	enum class TextTransform {
-		NoTransform,
-		ToUpper,
-	};
-	void setTextTransform(TextTransform transform);
-
 	~RoundButton();
 
 protected:
@@ -215,7 +216,7 @@ private:
 	RoundRect _roundRectOver;
 	Text::MarkedContext _context;
 
-	TextTransform _transform = TextTransform::ToUpper;
+	RoundButtonTextTransform _transform = RoundButtonTextTransform::NoTransform;
 	bool _fullRadius = false;
 	std::optional<std::array<int, 4>> _cornerRadii;
 
