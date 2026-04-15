@@ -87,6 +87,9 @@ public:
 
 	void setCloseByOutsideClick(bool close) override;
 	bool closeByOutsideClick() const override;
+	[[nodiscard]] crl::time animationDuration() const override {
+		return _content->layerAnimationDuration();
+	}
 
 protected:
 	void keyPressEvent(QKeyEvent *e) override;
