@@ -172,15 +172,20 @@ struct LineGeometry {
 	bool elided = false;
 };
 struct LineLayoutInfo {
-	int top = 0;
 	int left = 0;
 	int width = 0;
+	int bottom = 0;
 	bool rtl = false;
 };
 struct GeometryDescriptor {
 	Fn<LineGeometry(int line)> layout;
 	bool breakEverywhere = false;
 	bool *outElided = nullptr;
+};
+
+struct LinePostprocess {
+	Fn<Fn<void(QImage&)>(int lineIndex)> method;
+	not_null<QImage*> cache;
 };
 
 [[nodiscard]] not_null<SpoilerMessCache*> DefaultSpoilerCache();
@@ -267,6 +272,7 @@ struct PaintContext {
 	// Elision middle works only with elisionLines = 1 and is very limited.
 	bool elisionMiddle = false;
 	bool useFullWidth = false; // !(width = min(availableWidth, maxWidth()))
+	const LinePostprocess *linePostprocess = nullptr;
 };
 
 class String {
@@ -287,6 +293,9 @@ public:
 	String &operator=(String &&other);
 	~String();
 
+	[[nodiscard]] QSize countSize(
+		int width,
+		bool breakEverywhere = false) const;
 	[[nodiscard]] int countWidth(
 		int width,
 		bool breakEverywhere = false) const;
