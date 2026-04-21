@@ -91,6 +91,9 @@ public:
 		return _content->layerAnimationDuration();
 	}
 
+	rpl::producer<int> layerHeightMaxValue() override;
+	rpl::producer<int> contentHeightMaxValue() override;
+
 protected:
 	void keyPressEvent(QKeyEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
@@ -118,12 +121,15 @@ private:
 	[[nodiscard]] int countFullHeight() const;
 	[[nodiscard]] int countRealHeight() const;
 	[[nodiscard]] QRect loadingRect() const;
+	void updateMaxRealHeight();
 	void updateSize();
 
 	const style::Box *_st = nullptr;
 	not_null<LayerStackWidget*> _layer;
-	bool _layerType = false;
+	rpl::variable<int> _realHeightMax;
+	rpl::variable<int> _contentHeightMax;
 	int _fullHeight = 0;
+	bool _layerType = false;
 
 	bool _noContentMargin = false;
 	int _maxContentHeight = 0;
