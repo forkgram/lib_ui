@@ -74,7 +74,19 @@ SurfaceRhi::SurfaceRhi(
 		? QRhiWidget::Api::Metal
 		: QRhiWidget::Api::OpenGL);
 #elif defined(Q_OS_WIN)
-	setApi(QRhiWidget::Api::Direct3D11);
+	// Follow the main-window QRhi backend decision made at startup in
+	// Platform::SetupQtRhi and exposed via QT_WIDGETS_RHI_BACKEND so
+	// the overlay uses the same backend as the rest of the app.
+	//  * "d3d11" — used on Win8+ by default, and on Win7 as a fallback
+	//    when desktop GL is blacklisted for the current GPU.
+	//  * "opengl" — used on Win7 with a healthy GL driver.
+	//  * unset (main window on Qt raster) — attempt GL anyway;
+	//    QRhiWidget has an internal software fallback that degrades
+	//    gracefully when the driver refuses context creation.
+	const auto backend = qgetenv("QT_WIDGETS_RHI_BACKEND");
+	setApi((backend == "d3d11")
+		? QRhiWidget::Api::Direct3D11
+		: QRhiWidget::Api::OpenGL);
 #else
 	setApi(QRhiWidget::Api::OpenGL);
 #endif
@@ -210,7 +222,12 @@ void SurfaceRhi::ensureBackingStoreRhi() {
 		config.setApi(QPlatformBackingStoreRhiConfig::OpenGL);
 	}
 #elif defined(Q_OS_WIN)
-	config.setApi(QPlatformBackingStoreRhiConfig::D3D11);
+	// Mirror the Api choice used by setApi() above so the top-level
+	// backing store composites through the same QRhi backend as the
+	// QRhiWidget renders to.
+	config.setApi(::Platform::IsWindows8OrGreater()
+		? QPlatformBackingStoreRhiConfig::D3D11
+		: QPlatformBackingStoreRhiConfig::OpenGL);
 #else
 	config.setApi(QPlatformBackingStoreRhiConfig::OpenGL);
 #endif
