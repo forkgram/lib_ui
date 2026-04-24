@@ -23,6 +23,7 @@
 #ifdef Q_OS_WIN
 #include <QtCore/qt_windows.h>
 #include <commctrl.h>
+#pragma comment(lib, "comctl32.lib")
 #endif // Q_OS_WIN
 
 namespace Ui::GL {
