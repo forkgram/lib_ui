@@ -311,6 +311,14 @@ void WindowHelper::setFixedSize(QSize size) {
 	}
 }
 
+void WindowHelper::setStaysOnTop(bool enabled) {
+	if (const auto handle = window()->windowHandle()) {
+		handle->setFlag(Qt::WindowStaysOnTopHint, enabled);
+	} else {
+		BasicWindowHelper::setStaysOnTop(enabled);
+	}
+}
+
 void WindowHelper::setGeometry(QRect rect) {
 	SetGeometryAndScreen(
 		window(),

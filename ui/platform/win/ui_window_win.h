@@ -33,6 +33,7 @@ public:
 	void setManualFramelessOwned(bool enabled) override;
 	void setMinimumSize(QSize size) override;
 	void setFixedSize(QSize size) override;
+	void setStaysOnTop(bool enabled) override;
 	void setGeometry(QRect rect) override;
 	void showFullScreen() override;
 	void showNormal() override;

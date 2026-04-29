@@ -215,20 +215,22 @@ not_null<QWidget*> TitleControls::window() const {
 
 void TitleControls::init(Fn<void(bool maximized)> maximize) {
 	if (_top) {
-		[[maybe_unused]] const auto flags = window()->windowFlags();
 		_top->setClickedCallback([=] {
-#ifdef Q_OS_LINUX
 			_topState = !_topState;
+#ifdef Q_OS_LINUX
 			window()->setWindowFlag(Qt::WindowStaysOnTopHint, _topState);
 			window()->windowHandle()->destroy();
 			window()->windowHandle()->create();
 			window()->show();
 #else  // !Q_OS_LINUX
-			window()->setWindowFlags(_topState
-				? flags
-				: Qt::WindowStaysOnTopHint);
+			if (const auto rp = dynamic_cast<RpWindow*>(window().get())) {
+				rp->setStaysOnTop(_topState);
+			} else {
+				window()->setWindowFlag(
+					Qt::WindowStaysOnTopHint,
+					_topState);
+			}
 			window()->show();
-			_topState = !_topState;
 #endif // !Q_OS_LINUX
 			updateButtonsState();
 		});
