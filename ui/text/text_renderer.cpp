@@ -11,6 +11,7 @@
 #include "ui/text/text_extended_data.h"
 #include "ui/text/text_stack_engine.h"
 #include "ui/text/text_word.h"
+#include "ui/style/style_core.h"
 #include "styles/style_basic.h"
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
@@ -167,6 +168,7 @@ void Renderer::enumerate() {
 	Expects(!_geometry.outElided);
 
 	_lineHeight = _t->lineHeight();
+	_lineAscent = _t->_st->font->ascent;
 	_blocksSize = _t->_blocks.size();
 	_str = _t->_text.unicode();
 
@@ -191,7 +193,6 @@ void Renderer::enumerate() {
 				_t->_startParagraphRTL));
 	}
 
-	_lineHeight = _t->lineHeight();
 	_fontHeight = _t->_st->font->height;
 	auto last_rBearing = QFixed(0);
 	_last_rPadding = QFixed(0);
@@ -220,6 +221,7 @@ void Renderer::enumerate() {
 				--_quoteLinesLeft;
 			}
 			if (!hidden) {
+				resolveLineGeometry(w->position());
 				fillParagraphBg(changed ? _quotePadding.bottom() : 0);
 				if (!drawLinePostprocessed(w->position(), begin(_t->_blocks) + blockIndex) && !_quoteExpandLinkLookup) {
 					return;
@@ -282,6 +284,7 @@ void Renderer::enumerate() {
 		if (_quoteLinesLeft) {
 			--_quoteLinesLeft;
 		}
+		resolveLineGeometry(lineEnd);
 		fillParagraphBg(0);
 		while (_t->blockPosition(begin(_t->_blocks) + blockIndex + 1) < lineEnd) {
 			++blockIndex;
@@ -306,6 +309,7 @@ void Renderer::enumerate() {
 		if (_quoteLinesLeft) {
 			--_quoteLinesLeft;
 
+			resolveLineGeometry(_t->_text.size());
 			fillParagraphBg(_quotePadding.bottom());
 			if (!drawLinePostprocessed(_t->_text.size(), end(_t->_blocks))) {
 				return;
@@ -316,6 +320,16 @@ void Renderer::enumerate() {
 		_lookupResult.symbol = _t->_text.size();
 		_lookupResult.afterSymbol = false;
 	}
+}
+
+void Renderer::resolveLineGeometry(uint16 lineEnd) {
+	const auto metrics = _t->resolveLineGeometry(
+		_lineStart,
+		lineEnd,
+		_lineStartBlock);
+	_lineHeight = metrics.height();
+	_lineAscent = metrics.ascent;
+	_yDelta = _lineAscent - _t->_st->font->ascent;
 }
 
 void Renderer::fillParagraphBg(int paddingBottom) {
@@ -585,11 +599,10 @@ bool Renderer::drawLinePostprocessed(
 }
 
 bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
-	_yDelta = (_lineHeight - _fontHeight) / 2;
-	if (_yTo >= 0 && (_y + _yDelta >= _yTo || _y >= _yTo)) {
+	if (_yTo >= 0 && _y >= _yTo) {
 		return false;
 	}
-	if (_y + _yDelta + _fontHeight <= _yFrom) {
+	if (_y + _lineHeight <= _yFrom) {
 		if (_lookupSymbol) {
 			_lookupResult.symbol = (lineEnd > _lineStart) ? (lineEnd - 1) : _lineStart;
 			_lookupResult.afterSymbol = (lineEnd > _lineStart) ? true : false;
@@ -627,7 +640,15 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 		trimmedLineEnd = _t->blockEnd(end(_t->_blocks));
 	}
 
-	const auto startBlock = _t->_blocks[_lineStartBlock].get();
+	const auto startBlockIt = begin(_t->_blocks) + _lineStartBlock;
+	const auto startBlock = startBlockIt->get();
+	const auto startBlockEnd = _t->blockEnd(startBlockIt);
+	if (!_elidedLine
+		&& (trimmedLineEnd == _lineStart)
+		&& (startBlock->type() == TextBlockType::CustomEmoji)
+		&& (startBlockEnd > trimmedLineEnd)) {
+		trimmedLineEnd = startBlockEnd;
+	}
 
 	const auto extendLeft = (startBlock->position() < _lineStart)
 		? qMin(_lineStart - startBlock->position(), 2)
@@ -773,8 +794,70 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 		visualOrder[0] = skipIndex;
 	}
 
-	auto textY = _y + _yDelta + _t->_st->font->ascent;
+	auto textY = _y + _lineAscent;
 	auto emojiY = (_t->_st->font->height - st::emojiSize) / 2;
+	const auto customObjectRect = [&](
+			CustomEmoji *custom,
+			QFixed x,
+			const std::optional<CustomEmojiVerticalMetrics> &vertical) {
+		return QRect(
+			x.toInt(),
+			_y + (vertical
+				? (_lineAscent - vertical->ascent)
+				: (_yDelta + emojiY)),
+			custom->width(),
+			vertical ? vertical->height() : st::emojiSize);
+	};
+	const auto fillBackground = [&](
+			FixedRange range,
+			int top,
+			int height,
+			const QBrush &brush) {
+		if (range.empty() || brush.style() == Qt::NoBrush) {
+			return;
+		}
+		const auto left = range.from.toInt();
+		const auto width = range.till.toInt() - left;
+		_p->fillRect(left, top, width, height, brush);
+	};
+	const auto fillMarked = [&](FixedRange range, int top, int height) {
+		if (!_palette || !_palette->markBg->c.alpha()) {
+			return;
+		}
+		fillBackground(range, top, height, _palette->markBg->b);
+	};
+	const auto fillColorizedBackground = [&](
+			FixedRange range,
+			FixedRange selected,
+			int top,
+			int height) {
+		if (!_background.brush) {
+			return;
+		}
+		if (selected.empty()) {
+			fillBackground(range, top, height, *_background.brush);
+			return;
+		}
+		if (range.from < selected.from) {
+			fillBackground(
+				{ range.from, selected.from },
+				top,
+				height,
+				*_background.brush);
+		}
+		if (const auto selectedBrush = _background.brushSelected) {
+			fillBackground(selected, top, height, *selectedBrush);
+		} else if (_palette && _palette->selectBg->c.alpha()) {
+			fillBackground(selected, top, height, _palette->selectBg->b);
+		}
+		if (selected.till < range.till) {
+			fillBackground(
+				{ selected.till, range.till },
+				top,
+				height,
+				*_background.brush);
+		}
+	};
 
 	auto lastLeftToMiddleX = x;
 
@@ -791,6 +874,10 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 		const auto rtl = (si.analysis.bidiLevel % 2);
 
 		applyBlockProperties(e, block);
+		const auto marked = (block->flags() & TextBlockFlag::Marked);
+		const auto baselineShift = _t->blockBaselineShift(block);
+		const auto textTop = textY + baselineShift - _f->ascent;
+		const auto textHeight = _f->height;
 		if (si.analysis.flags >= QScriptAnalysis::TabOrObject) {
 			const auto _type = block->type();
 			if (!_p && _lookupX >= x && _lookupX < x + si.width) { // _lookupRequest
@@ -798,7 +885,7 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 					return false;
 				}
 				if (_lookupLink) {
-					if (_lookupY >= _y + _yDelta && _lookupY < _y + _yDelta + _fontHeight) {
+					if (_lookupY >= _y && _lookupY < _y + _lineHeight) {
 						if (const auto link = lookupLink(block)) {
 							_lookupResult.link = link;
 						}
@@ -860,6 +947,11 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 							const auto bigWidth = x - lastLeftToMiddleX;
 							const auto smallWidth = _f->elidew;
 							const auto left = lastLeftToMiddleX;
+							_p->setFont(WithFlags(
+								_t->_st->font,
+								(block->flags()
+									& ~(TextBlockFlag::Subscript
+										| TextBlockFlag::Superscript))));
 							_p->drawText(
 								(left + (bigWidth - smallWidth) / 2).toReal(),
 								textY,
@@ -874,14 +966,56 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 				}
 				const auto fillSelect = _background.selectActiveBlock
 					? FixedRange{ x, x + si.width }
-					: findSelectEmojiRange(
+					: findSelectObjectRange(
 						si,
 						blockIt,
 						x,
 						_selection);
-				fillSelectRange(fillSelect);
+				CustomEmoji *custom = nullptr;
+				if (_type == TextBlockType::CustomEmoji) {
+					custom = static_cast<const CustomEmojiBlock*>(block)->custom();
+				}
+				const auto vertical = custom
+					? custom->vertical(*_t->_st)
+					: std::nullopt;
+				const auto box = custom
+					? customObjectRect(
+						custom,
+						x,
+						vertical)
+					: QRect();
+				if (custom) {
+					if (marked) {
+						fillMarked(
+							{ x, x + si.width },
+							box.top(),
+							box.height());
+					}
+					if (_background.brush) {
+						fillColorizedBackground(
+							{ x, x + si.width },
+							fillSelect,
+							box.top(),
+							box.height());
+					} else {
+						fillSelectRange(
+							fillSelect,
+							box.top(),
+							box.height());
+					}
+				} else {
+					if (_background.brush) {
+						fillColorizedBackground(
+							{ x, x + si.width },
+							fillSelect,
+							_y + _yDelta,
+							_fontHeight);
+					} else {
+						fillSelectRange(fillSelect);
+					}
+				}
 				if (_highlight) {
-					pushHighlightRange(findSelectEmojiRange(
+					pushHighlightRange(findSelectObjectRange(
 						si,
 						blockIt,
 						x,
@@ -907,7 +1041,7 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 							Emoji::GetSizeNormal(),
 							ex,
 							ey);
-					} else {
+					} else if (_type == TextBlockType::CustomEmoji) {
 						const auto custom = static_cast<const CustomEmojiBlock*>(block)->custom();
 						const auto selected = (fillSelect.from <= x)
 							&& (fillSelect.till > x);
@@ -925,11 +1059,33 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 						} else {
 							_customEmojiContext->textColor = color;
 						}
-						_customEmojiContext->position = {
-							ex + _customEmojiSkip,
-							ey + _customEmojiSkip,
-						};
-						custom->paint(*_p, *_customEmojiContext);
+						const auto replacementText = custom->replacementText();
+						const auto semantics = custom->semantics();
+						const auto showFallbackText = !semantics.isRealCustomEmoji
+							&& !replacementText.isEmpty()
+							&& !custom->ready()
+							&& !custom->readyInDefaultState();
+						if (!showFallbackText) {
+							_customEmojiContext->position = vertical
+								? box.topLeft()
+								: QPoint(
+									ex + _customEmojiSkip,
+									ey + _customEmojiSkip);
+							custom->paint(*_p, *_customEmojiContext);
+						}
+						if (showFallbackText) {
+							_p->save();
+							_p->setClipRect(box, Qt::IntersectClip);
+							_p->setPen(((fillSelect.from <= x)
+								&& (fillSelect.till > x))
+								? *_currentPenSelected
+								: *_currentPen);
+							_p->drawText(
+								box,
+								Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+								replacementText);
+							_p->restore();
+						}
 					}
 					if (hasSpoiler) {
 						_p->setOpacity(opacity);
@@ -1024,6 +1180,11 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 						const auto bigWidth = x - itemWidth - lastLeftToMiddleX;
 						const auto smallWidth = _f->elidew;
 						const auto left = lastLeftToMiddleX;
+						_p->setFont(WithFlags(
+							_t->_st->font,
+							(block->flags()
+								& ~(TextBlockFlag::Subscript
+									| TextBlockFlag::Superscript))));
 						_p->drawText(
 							(left + (bigWidth - smallWidth) / 2).toReal(),
 							textY,
@@ -1044,7 +1205,7 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 				return false;
 			}
 			if (_lookupLink) {
-				if (_lookupY >= _y + _yDelta && _lookupY < _y + _yDelta + _fontHeight) {
+				if (_lookupY >= textTop && _lookupY < textTop + textHeight) {
 					if (const auto link = lookupLink(block)) {
 						_lookupResult.link = link;
 					}
@@ -1118,14 +1279,25 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 				const auto from = fillSelect.from.toInt();
 				selectedRect = QRect(
 					from,
-					_y + _yDelta,
+					textTop,
 					fillSelect.till.toInt() - from,
-					_fontHeight);
+					textHeight);
 			}
 			const auto hasSelected = !fillSelect.empty();
 			const auto hasNotSelected = (fillSelect.from != itemRange.from)
 				|| (fillSelect.till != itemRange.till);
-			fillSelectRange(fillSelect);
+			if (marked) {
+				fillMarked(itemRange, textTop, textHeight);
+			}
+			if (_background.brush) {
+				fillColorizedBackground(
+					itemRange,
+					fillSelect,
+					textTop,
+					textHeight);
+			} else {
+				fillSelectRange(fillSelect, textTop, textHeight);
+			}
 
 			if (_highlight) {
 				pushHighlightRange(findSelectTextRange(
@@ -1181,7 +1353,9 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 						const auto clippingRegion = _p->clipRegion();
 						_p->setClipRect(selectedRect, Qt::IntersectClip);
 						_p->setPen(*_currentPenSelected);
-						_p->drawTextItem(QPointF(x.toReal(), textY), gf);
+						_p->drawTextItem(
+							QPointF(x.toReal(), textY + baselineShift),
+							gf);
 						const auto externalClipping = clippingEnabled
 							? clippingRegion
 							: QRegion(QRect(
@@ -1191,7 +1365,9 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 								_y + 2 * _lineHeight));
 						_p->setClipRegion(externalClipping - selectedRect);
 						_p->setPen(*_currentPen);
-						_p->drawTextItem(QPointF(x.toReal(), textY), gf);
+						_p->drawTextItem(
+							QPointF(x.toReal(), textY + baselineShift),
+							gf);
 #ifdef Q_OS_MAC
 						_p->restore();
 #else // Q_OS_MAC
@@ -1203,11 +1379,15 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 #endif // Q_OS_MAC
 					} else {
 						_p->setPen(*_currentPenSelected);
-						_p->drawTextItem(QPointF(x.toReal(), textY), gf);
+						_p->drawTextItem(
+							QPointF(x.toReal(), textY + baselineShift),
+							gf);
 					}
 				} else {
 					_p->setPen(*_currentPen);
-					_p->drawTextItem(QPointF(x.toReal(), textY), gf);
+					_p->drawTextItem(
+						QPointF(x.toReal(), textY + baselineShift),
+						gf);
 				}
 				if (complexClipping) {
 					if (complexClippingEnabled) {
@@ -1238,7 +1418,7 @@ bool Renderer::drawLine(uint16 lineEnd, Blocks::const_iterator blocksEnd) {
 	return !_elidedLine;
 }
 
-FixedRange Renderer::findSelectEmojiRange(
+FixedRange Renderer::findSelectObjectRange(
 		const QScriptItem &si,
 		std::vector<Block>::const_iterator blockIt,
 		QFixed x,
@@ -1318,12 +1498,24 @@ FixedRange Renderer::findSelectTextRange(
 }
 
 void Renderer::fillSelectRange(FixedRange range) {
+	fillSelectRange(range, _y + _yDelta, _fontHeight);
+}
+
+void Renderer::fillSelectRange(FixedRange range, int top, int height) {
 	if (range.empty()) {
 		return;
 	}
+
+	const auto defaultLineTop = _y + _lineAscent - _t->_st->font->ascent;
+	const auto defaultLineBottom = defaultLineTop + _t->_st->font->height;
+	const auto bottom = std::max(top + height, defaultLineBottom);
+
+	top = std::min(top, defaultLineTop);
+	height = bottom - top;
+
 	const auto left = range.from.toInt();
 	const auto width = range.till.toInt() - left;
-	_p->fillRect(left, _y + _yDelta, width, _fontHeight, _palette->selectBg);
+	_p->fillRect(left, top, width, height, _palette->selectBg);
 }
 
 void Renderer::pushHighlightRange(FixedRange range) {
@@ -1373,6 +1565,7 @@ void Renderer::fillRectsFromRanges(
 	}
 	auto lastTill = ranges.front().from.toInt() - 1;
 	const auto y = _y + _yDelta;
+	const auto height = _fontHeight;
 	for (const auto &range : ranges) {
 		auto from = range.from.toInt();
 		auto till = range.till.toInt();
@@ -1380,9 +1573,9 @@ void Renderer::fillRectsFromRanges(
 			auto &last = rects.back();
 			from = std::min(from, last.x());
 			till = std::max(till, last.x() + last.width());
-			last = { from, y, till - from, _fontHeight };
+			last = { from, y, till - from, height };
 		} else {
-			rects.push_back({ from, y, till - from, _fontHeight });
+			rects.push_back({ from, y, till - from, height });
 		}
 		lastTill = till;
 	}
@@ -1472,6 +1665,7 @@ const AbstractBlock *Renderer::markBlockForElisionGetEnd(int blockIndex) {
 			.flags = (*_elideSavedBlock)->flags(),
 			.linkIndex = (*_elideSavedBlock)->linkIndex(),
 			.colorIndex = (*_elideSavedBlock)->colorIndex(),
+			.bgIndex = (*_elideSavedBlock)->bgIndex(),
 		});
 	}
 	_indexOfElidedBlock = blockIndex;
@@ -1637,7 +1831,7 @@ void Renderer::applyBlockProperties(
 		}
 		return _t->_st->font;
 	}();
-	const auto newFont = WithFlags(usedFont, flags);
+	const auto newFont = WithFlags(usedFont, block->flags());
 	if (_f != newFont) {
 		_f = newFont;
 		const auto use = (_f->family() == _t->_st->font->family())
@@ -1679,6 +1873,11 @@ void Renderer::applyBlockProperties(
 				_currentPen = &_originalPen;
 				_currentPenSelected = &_originalPenSelected;
 			}
+			if (const auto bgIndex = block->bgIndex()
+				; bgIndex && (bgIndex <= _colors.size())) {
+				_background.brush = _colors[bgIndex - 1].bg;
+				_background.brushSelected = _colors[bgIndex - 1].bgSelected;
+			}
 		} else if (isMono) {
 			_currentPen = &_palette->monoFg->p;
 			_currentPenSelected = &_palette->selectMonoFg->p;
@@ -1717,7 +1916,11 @@ ClickHandlerPtr Renderer::lookupLink(const AbstractBlock *block) const {
 			return nullptr;
 		}
 		const auto customBlock = static_cast<const CustomEmojiBlock*>(block);
-		customEmoji->entityData = customBlock->custom()->entityData();
+		const auto custom = customBlock->custom();
+		if (!custom->semantics().allowCustomEmojiClick) {
+			return nullptr;
+		}
+		customEmoji->entityData = custom->entityData();
 		if (customEmoji->predicate
 			&& !customEmoji->predicate(customEmoji->entityData)) {
 			return nullptr;

@@ -20,6 +20,16 @@ inline bool TranslucentWindowsSupported() {
 inline void ClearTransientParent(not_null<QWidget*> widget) {
 }
 
+inline std::optional<QRect> ForeignWindowGeometry(
+		const ForeignParent &parent) {
+	return std::nullopt;
+}
+
+inline void SetForeignTransientParent(
+		not_null<QWidget*> widget,
+		const ForeignParent &parent) {
+}
+
 inline constexpr bool UseMainQueueGeneric() {
 	return ::Platform::IsMacStoreBuild();
 }

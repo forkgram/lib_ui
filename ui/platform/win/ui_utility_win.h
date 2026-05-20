@@ -38,6 +38,16 @@ inline void AcceptAllMouseInput(not_null<QWidget*> widget) {
 inline void ClearTransientParent(not_null<QWidget*> widget) {
 }
 
+inline std::optional<QRect> ForeignWindowGeometry(
+		const ForeignParent &parent) {
+	return std::nullopt;
+}
+
+inline void SetForeignTransientParent(
+		not_null<QWidget*> widget,
+		const ForeignParent &parent) {
+}
+
 inline void DisableSystemWindowResize(not_null<QWidget*> widget, QSize ratio) {
 }
 

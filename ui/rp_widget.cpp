@@ -339,22 +339,12 @@ RpWidget::RpWidget(QWidget *parent)
 : RpWidgetBase<QWidget>(parent) {
 	[[maybe_unused]] static const auto Once = [] {
 		auto format = QSurfaceFormat::defaultFormat();
-		// vsync on Windows avoids DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING
-		// in Qt's D3D11 RHI, which otherwise makes NVIDIA GeForce
-		// Experience classify the process as a game (spawning the
-		// "Press Alt+Z" overlay notification and DXGI hooks that
-		// corrupt DirectComposition alpha output).
-#ifdef Q_OS_WIN
-		format.setSwapInterval(1);
-#else // Q_OS_WIN
 		format.setSwapInterval(::Platform::MetalSupported() ? 1 : 0);
-#endif // !Q_OS_WIN
 #ifdef DESKTOP_APP_USE_ANGLE
 		format.setRedBufferSize(8);
 		format.setGreenBufferSize(8);
 		format.setBlueBufferSize(8);
 #endif // DESKTOP_APP_USE_ANGLE
-		format.setAlphaBufferSize(8);
 #ifdef Q_OS_MAC
 		format.setColorSpace(QColorSpace::SRgb);
 #endif // Q_OS_MAC

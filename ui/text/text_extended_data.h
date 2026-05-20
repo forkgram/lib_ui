@@ -6,8 +6,8 @@
 //
 #pragma once
 
-#include "ui/effects/spoiler_mess.h"
 #include "ui/effects/animations.h"
+#include "ui/effects/spoiler_mess.h"
 #include "ui/click_handler.h"
 
 namespace Ui::Text {

@@ -46,9 +46,9 @@ private:
 
 	QImage _image;
 	QImage _storage;
-	QRhiTexture *_texture = nullptr;
-	QRhiSampler *_sampler = nullptr;
-	QRhi *_rhi = nullptr;
+	[[maybe_unused]] QRhiTexture *_texture = nullptr;
+	[[maybe_unused]] QRhiSampler *_sampler = nullptr;
+	[[maybe_unused]] QRhi *_rhi = nullptr;
 	qint64 _cacheKey = 0;
 	QSize _subimage;
 	QSize _textureSize;

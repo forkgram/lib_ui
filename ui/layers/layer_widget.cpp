@@ -826,7 +826,7 @@ void LayerStackWidget::showBox(
 		LayerOptions options,
 		anim::type animated) {
 	showLayer(
-		std::make_unique<BoxLayerWidget>(this, std::move(box)),
+		std::make_unique<BoxLayerWidget>(this, this, std::move(box)),
 		options,
 		animated);
 }

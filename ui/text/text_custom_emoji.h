@@ -14,8 +14,13 @@
 #include <crl/crl_time.h>
 
 #include <any>
+#include <optional>
 
 class QPainter;
+
+namespace style {
+struct TextStyle;
+} // namespace style
 
 namespace Ui::Emoji {
 
@@ -49,12 +54,39 @@ struct CustomEmojiPaintContext {
 	} internal;
 };
 
+struct CustomEmojiVerticalMetrics {
+	int ascent = 0;
+	int descent = 0;
+
+	[[nodiscard]] int height() const {
+		return ascent + descent;
+	}
+};
+
+struct CustomEmojiSemantics {
+	bool isEmoji = true;
+	bool isRealCustomEmoji = true;
+	bool exportEntity = true;
+	bool unloadPersistentAnimation = true;
+	bool allowCustomEmojiClick = true;
+};
+
 class CustomEmoji {
 public:
 	virtual ~CustomEmoji() = default;
 
 	[[nodiscard]] virtual int width() = 0;
 	[[nodiscard]] virtual QString entityData() = 0;
+	[[nodiscard]] virtual std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &) {
+		return std::nullopt;
+	}
+	[[nodiscard]] virtual QString replacementText() {
+		return QString();
+	}
+	[[nodiscard]] virtual CustomEmojiSemantics semantics() {
+		return {};
+	}
 
 	using Context = CustomEmojiPaintContext;
 	virtual void paint(QPainter &p, const Context &context) = 0;
@@ -70,6 +102,10 @@ public:
 
 	int width() override;
 	QString entityData() override;
+	std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &st) override;
+	QString replacementText() override;
+	CustomEmojiSemantics semantics() override;
 	void paint(QPainter &p, const Context &context) override;
 	void unload() override;
 	bool ready() override;
@@ -87,6 +123,10 @@ public:
 
 	int width() override;
 	QString entityData() override;
+	std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &st) override;
+	QString replacementText() override;
+	CustomEmojiSemantics semantics() override;
 	void paint(QPainter &p, const Context &context) override;
 	void unload() override;
 	bool ready() override;
@@ -106,6 +146,10 @@ public:
 
 	int width() override;
 	QString entityData() override;
+	std::optional<CustomEmojiVerticalMetrics> vertical(
+		const style::TextStyle &st) override;
+	QString replacementText() override;
+	CustomEmojiSemantics semantics() override;
 	void paint(QPainter &p, const Context &context) override;
 	void unload() override;
 	bool ready() override;

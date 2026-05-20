@@ -343,7 +343,7 @@ void WindowHelper::Private::initCustomTitle() {
 	// until the new window appears and reapply customizations.
 	const auto guard = base::make_weak(_owner->window());
 	const auto savedWindow = _nativeWindow;
-	const auto poll = std::make_shared<std::function<void(int)>>();
+	const auto poll = std::make_shared<Fn<void(int)>>();
 	*poll = [this, guard, savedWindow, poll](int attempts) {
 		if (!guard || attempts <= 0) return;
 		const auto wid = _owner->window()->winId();

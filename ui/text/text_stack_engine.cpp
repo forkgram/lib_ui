@@ -118,7 +118,7 @@ void StackEngine::itemize() {
 #endif // Qt < 6.0.0
 	}
 
-	// Override script and flags for emoji and custom emoji blocks.
+	// Override script and flags for object-like blocks.
 	const auto end = _offset + length;
 	for (auto block = _bStart; blockPosition(block) < end; ++block) {
 		const auto type = (*block)->type();
@@ -130,7 +130,10 @@ void StackEngine::itemize() {
 				|| type == TextBlockType::Skip) {
 				for (auto i = from - _offset, count = till - _offset; i != count; ++i) {
 					_analysis[i].script = QChar::Script_Common;
-					_analysis[i].flags = (chars[i] == QChar::Space)
+					const auto emojiTrailingSpace =
+						(type == TextBlockType::Emoji)
+						&& (chars[i] == QChar::Space);
+					_analysis[i].flags = emojiTrailingSpace
 						? QScriptAnalysis::None
 						: QScriptAnalysis::Object;
 				}
@@ -201,12 +204,12 @@ void StackEngine::itemize() {
 
 void StackEngine::updateFont(not_null<const AbstractBlock*> block) {
 	const auto flags = block->flags();
-	const auto newFont = WithFlags(_t->_st->font, flags);
+	const auto newFont = WithFlags(_t->_st->font, block->flags());
 	if (_font != newFont) {
 		_font = (newFont->family() == _t->_st->font->family())
 			? WithFlags(_t->_st->font, flags, newFont->flags())
 			: newFont;
-		_engine.fnt = _font->f;
+		_engine.fnt = newFont;
 		_engine.resetFontEngineCache();
 	}
 }

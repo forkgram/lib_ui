@@ -51,6 +51,9 @@ constexpr auto kMaxDiacAfterSymbol = 2;
 						|| type == EntityType::Italic
 						|| type == EntityType::Underline
 						|| type == EntityType::StrikeOut
+						|| type == EntityType::Subscript
+						|| type == EntityType::Superscript
+						|| type == EntityType::Marked
 						|| type == EntityType::Colorized
 						|| type == EntityType::Spoiler
 						|| type == EntityType::Code
@@ -91,6 +94,13 @@ BlockParser::StartedEntity::StartedEntity(uint16 index, Type type)
 		: (_value < kStringLinkIndexShift));
 }
 
+BlockParser::StartedEntity::StartedEntity(ColorIndices indices)
+: _value(PackColorIndices(indices))
+, _type(Type::Colorized) {
+	Expects(indices.colorIndex <= AbstractBlock::kMaxColorIndex);
+	Expects(indices.bgIndex <= AbstractBlock::kMaxBgIndex);
+}
+
 BlockParser::StartedEntity::Type BlockParser::StartedEntity::type() const {
 	return _type;
 }
@@ -110,9 +120,13 @@ std::optional<uint16> BlockParser::StartedEntity::linkIndex() const {
 	return std::nullopt;
 }
 
-std::optional<uint16> BlockParser::StartedEntity::colorIndex() const {
+std::optional<BlockParser::StartedEntity::ColorIndices>
+BlockParser::StartedEntity::colorIndices() const {
 	if (_type == Type::Colorized) {
-		return uint16(_value);
+		return ColorIndices{
+			.colorIndex = uint16(_value & kColorIndexMask),
+			.bgIndex = uint16(_value >> kBgIndexShift),
+		};
 	}
 	return std::nullopt;
 }
@@ -179,12 +193,19 @@ void BlockParser::createBlock(int skipBack) {
 	auto custom = _customEmojiData.isEmpty()
 		? nullptr
 		: MakeCustomEmoji(_customEmojiData, _context);
+	if (custom) {
+		const auto replacementLength = custom->replacementText().size();
+		if (replacementLength > length) {
+			_t->insertReplacement(_blockStart, replacementLength, length);
+		}
+	}
 	const auto push = [&](auto &&factory, auto &&...args) {
 		_tBlocks.push_back(factory({
 			.position = uint16(_blockStart),
 			.flags = _flags,
 			.linkIndex = linkIndex,
 			.colorIndex = _colorIndex,
+			.bgIndex = _bgIndex,
 		}, std::forward<decltype(args)>(args)...));
 	};
 	if (custom) {
@@ -199,7 +220,7 @@ void BlockParser::createBlock(int skipBack) {
 	// Diacritic can't attach from the next block to this one.
 	_allowDiacritic = false;
 	_blockStart += length;
-	_customEmojiData = QByteArray();
+	_customEmojiData = QString();
 	_emoji = nullptr;
 }
 
@@ -297,10 +318,12 @@ void BlockParser::finishEntities() {
 					createBlock();
 					_linkIndex = 0;
 				}
-			} else if (const auto colorIndex = list.back().colorIndex()) {
-				if (_colorIndex == *colorIndex) {
+			} else if (const auto colorIndices = list.back().colorIndices()) {
+				if (_colorIndex == colorIndices->colorIndex
+					&& _bgIndex == colorIndices->bgIndex) {
 					createBlock();
 					_colorIndex = 0;
+					_bgIndex = 0;
 				}
 			}
 			list.pop_back();
@@ -357,6 +380,14 @@ bool BlockParser::checkEntities() {
 		flags = TextBlockFlag::Spoiler;
 	} else if (entityType == EntityType::StrikeOut) {
 		flags = TextBlockFlag::StrikeOut;
+	} else if (entityType == EntityType::Subscript) {
+		flags = TextBlockFlag::Subscript;
+		_t->_hasSubscriptsOrSuperscripts = true;
+	} else if (entityType == EntityType::Superscript) {
+		flags = TextBlockFlag::Superscript;
+		_t->_hasSubscriptsOrSuperscripts = true;
+	} else if (entityType == EntityType::Marked) {
+		flags = TextBlockFlag::Marked;
 	} else if (entityType == EntityType::FormattedDate) {
 		const auto entityData = _waitingEntity->data();
 		const auto [dateValue, dateFlags] = DeserializeFormattedDateData(
@@ -457,10 +488,21 @@ bool BlockParser::checkEntities() {
 		createBlock();
 
 		const auto data = _waitingEntity->data();
-		_colorIndex = data.isEmpty() ? 1 : (data.front().unicode() + 1);
+		const auto colorIndex = std::clamp(
+			data.isEmpty() ? 1 : (data.front().unicode() + 1),
+			1,
+			AbstractBlock::kMaxColorIndex);
+		const auto bgIndex = std::clamp(
+			(data.size() > 1) ? data[1].unicode() : 0,
+			0,
+			AbstractBlock::kMaxBgIndex);
+		_colorIndex = colorIndex;
+		_bgIndex = bgIndex;
 		_startedEntities[entityEnd].emplace_back(
-			_colorIndex,
-			Type::Colorized);
+			StartedEntity::ColorIndices{
+				.colorIndex = _colorIndex,
+				.bgIndex = _bgIndex,
+			});
 	}
 
 	if (link.type != EntityType::Invalid) {
@@ -529,7 +571,9 @@ void BlockParser::parseCurrentChar() {
 	_emojiLookback = 0;
 	const auto inCustomEmoji = !_customEmojiData.isEmpty();
 	const auto isNewLine = !inCustomEmoji && _multiline && IsNewline(_ch);
-	const auto replaceWithSpace = IsSpace(_ch) && (_ch != QChar::Nbsp);
+	const auto replaceWithSpace = IsSpace(_ch)
+		&& (_ch != QChar::Nbsp)
+		&& (!inCustomEmoji || _ch != QChar::ObjectReplacementCharacter);
 	const auto isDiacritic = IsDiacritic(_ch);
 	const auto skip = [&] {
 		if (IsBad(_ch) || _ch.isLowSurrogate()) {
@@ -729,39 +773,58 @@ void BlockParser::finalize(const TextParseOptions &options) {
 	_t->_hasNotEmojiAndSpaces = false;
 	auto spacesCheckFrom = uint16(-1);
 	const auto length = int(_tText.size());
+	const auto finishSpacesCheck = [&](uint16 checkTill) {
+		if (_t->_hasNotEmojiAndSpaces
+			|| (spacesCheckFrom == uint16(-1))) {
+			return;
+		}
+		for (auto i = spacesCheckFrom; i != checkTill; ++i) {
+			Assert(i < length);
+			if (!_tText[i].isSpace()) {
+				_t->_hasNotEmojiAndSpaces = true;
+				break;
+			}
+		}
+		spacesCheckFrom = uint16(-1);
+	};
 	for (auto &block : _tBlocks) {
-		if (block->type() == TextBlockType::CustomEmoji) {
+		const auto type = block->type();
+		const auto custom = (type == TextBlockType::CustomEmoji)
+			? static_cast<CustomEmoji*>(
+				static_cast<const CustomEmojiBlock*>(block.get())->custom())
+			: nullptr;
+		const auto semantics = custom
+			? custom->semantics()
+			: CustomEmojiSemantics();
+		const auto isEmoji = (type == TextBlockType::Emoji)
+			|| (custom && semantics.isEmoji);
+		const auto isRealCustomEmoji = custom && semantics.isRealCustomEmoji;
+		if (isRealCustomEmoji) {
 			_t->_hasCustomEmoji = true;
-		} else if (block->type() != TextBlockType::Newline
-			&& block->type() != TextBlockType::Skip) {
+		} else if (type != TextBlockType::Newline
+			&& type != TextBlockType::Skip) {
 			_t->_isOnlyCustomEmoji = false;
 		} else if (block->linkIndex()) {
 			_t->_isOnlyCustomEmoji = _t->_isIsolatedEmoji = false;
 		}
 		if (!_t->_hasNotEmojiAndSpaces) {
-			if (block->type() == TextBlockType::Text) {
+			if (type == TextBlockType::Text) {
 				if (spacesCheckFrom == uint16(-1)) {
 					spacesCheckFrom = block->position();
 				}
-			} else if (spacesCheckFrom != uint16(-1)) {
-				const auto checkTill = block->position();
-				for (auto i = spacesCheckFrom; i != checkTill; ++i) {
-					Assert(i < length);
-					if (!_tText[i].isSpace()) {
-						_t->_hasNotEmojiAndSpaces = true;
-						break;
-					}
+			} else {
+				finishSpacesCheck(block->position());
+				if (custom && !semantics.isEmoji) {
+					_t->_hasNotEmojiAndSpaces = true;
 				}
-				spacesCheckFrom = uint16(-1);
 			}
 		}
 		if (_t->_isIsolatedEmoji) {
-			if (block->type() == TextBlockType::CustomEmoji
-				|| block->type() == TextBlockType::Emoji) {
+			if (isEmoji) {
 				if (++isolatedEmojiCount > kIsolatedEmojiLimit) {
 					_t->_isIsolatedEmoji = false;
 				}
-			} else if (block->type() != TextBlockType::Skip) {
+			} else if (type != TextBlockType::Skip) {
 				_t->_isIsolatedEmoji = false;
 			}
 		}
@@ -843,16 +906,7 @@ void BlockParser::finalize(const TextParseOptions &options) {
 	if (_tBlocks.empty() || hasSpoiler) {
 		_t->_isIsolatedEmoji = false;
 	}
-	if (!_t->_hasNotEmojiAndSpaces && spacesCheckFrom != uint16(-1)) {
-		Assert(spacesCheckFrom < length);
-		for (auto i = spacesCheckFrom; i != length; ++i) {
-			Assert(i < length);
-			if (!_tText[i].isSpace()) {
-				_t->_hasNotEmojiAndSpaces = true;
-				break;
-			}
-		}
-	}
+	finishSpacesCheck(length);
 	_tText.squeeze();
 	_tBlocks.shrink_to_fit();
 	if (const auto extended = _t->_extended.get()) {
