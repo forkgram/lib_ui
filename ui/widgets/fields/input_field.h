@@ -153,6 +153,10 @@ public:
 	static const QString kTagSpoiler;
 	static const QString kTagBlockquote;
 	static const QString kTagBlockquoteCollapsed;
+	static const QString kTagIvMarked;
+	static const QString kTagIvSubscript;
+	static const QString kTagIvSuperscript;
+	static const QString kTagIvMath;
 	static const QString kCustomEmojiTagStart;
 	static const QString kCustomDateTagStart;
 	static const int kCollapsedQuoteFormat; // QTextFormat::ObjectTypes
@@ -250,6 +254,7 @@ public:
 	struct ExtendedContextMenu {
 		QMenu *menu = nullptr;
 		std::shared_ptr<QContextMenuEvent> event;
+		Fn<void(not_null<PopupMenu*>)> setupPopupMenu;
 	};
 
 	void setPlaceholderColorOverride(const style::color &color);
@@ -264,6 +269,10 @@ public:
 		rpl::producer<bool> systemTextReplacesEnabled = {});
 	void setMarkdownReplacesEnabled(bool enabled);
 	void setMarkdownReplacesEnabled(rpl::producer<MarkdownEnabledState> enabled);
+	void setInstantViewEditorTagsEnabled(bool enabled);
+	[[nodiscard]] bool instantViewEditorTagsEnabled() const {
+		return _instantViewEditorTagsEnabled;
+	}
 	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
 	void commitInstantReplacement(
 		int from,
@@ -279,6 +288,8 @@ public:
 	[[nodiscard]] static QString CustomEmojiLink(QStringView entityData);
 	[[nodiscard]] static QString CustomEmojiEntityData(QStringView link);
 	[[nodiscard]] static bool IsCustomDateLink(QStringView link);
+	[[nodiscard]] static bool IsInstantViewEditorTag(QStringView tag);
+	[[nodiscard]] static bool IsInstantViewAnchorLink(QStringView link);
 
 	[[nodiscard]] const QString &getLastText() const {
 		return _lastTextWithTags.text;
@@ -303,6 +314,8 @@ public:
 
 	bool isUndoAvailable() const;
 	bool isRedoAvailable() const;
+	void undo();
+	void redo();
 
 	[[nodiscard]] MarkdownEnabledState markdownEnabledState() const {
 		return _markdownEnabledState;
@@ -410,6 +423,8 @@ private:
 	void updatePalette();
 	void refreshPlaceholder(const QString &text);
 	int placeholderSkipWidth() const;
+	[[nodiscard]] QMargins placeholderPaintMargins() const;
+	[[nodiscard]] float64 nonScaledPlaceholderBaseline() const;
 
 	[[nodiscard]] static std::vector<MarkdownAction> MarkdownActions();
 	[[nodiscard]] static std::vector<MarkdownAction> MarkdownActionsNotes();
@@ -424,7 +439,10 @@ private:
 	void focusOutEventInner(QFocusEvent *e);
 	void setFocused(bool focused);
 	void keyPressEventInner(QKeyEvent *e);
-	void contextMenuEventInner(QContextMenuEvent *e, QMenu *m = nullptr);
+	void contextMenuEventInner(
+		QContextMenuEvent *e,
+		QMenu *m = nullptr,
+		Fn<void(not_null<PopupMenu*>)> setupPopupMenu = nullptr);
 	void dropEventInner(QDropEvent *e);
 	void inputMethodEventInner(QInputMethodEvent *e);
 	void paintEventInner(QPaintEvent *e);
@@ -468,6 +486,7 @@ private:
 	void processFormatting(int changedPosition, int changedEnd);
 
 	void chopByMaxLength(int insertPosition, int insertLength);
+	void performUndoRedo(bool redo);
 
 	bool processMarkdownReplaces(const QString &appended);
 	//bool processMarkdownReplace(const QString &tag);
@@ -613,8 +632,10 @@ private:
 	SubmitSettings _submitSettings = SubmitSettings::Enter;
 	MarkdownEnabledState _markdownEnabledState;
 	MarkdownSet _markdownSet = MarkdownSet::All;
+	bool _instantViewEditorTagsEnabled = false;
 	bool _undoAvailable = false;
 	bool _redoAvailable = false;
+	bool _performingUndoRedo = false;
 	bool _insertedTagsDelayClear = false;
 	bool _inHeightCheck = false;
 

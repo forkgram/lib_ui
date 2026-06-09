@@ -21,6 +21,8 @@
 
 #include <QtGui/QGuiApplication>
 
+#include <algorithm>
+
 namespace Ui {
 
 const QString kQEllipsis = u"..."_q;
@@ -635,7 +637,7 @@ void String::recountNaturalSize(
 			if (initial) {
 				computeParagraphDirection(word.position());
 			}
-			const auto lineHeight = resolveLineGeometry(
+			const auto lineHeight = resolveLineMetrics(
 				lastNewlineStart,
 				word.position(),
 				lineStartBlockHint).height();
@@ -674,7 +676,7 @@ void String::recountNaturalSize(
 		computeParagraphDirection(_text.size());
 	}
 	if (width > 0) {
-		const auto lineHeight = resolveLineGeometry(
+		const auto lineHeight = resolveLineMetrics(
 			lastNewlineStart,
 			_text.size(),
 			lineStartBlockHint).height();
@@ -1229,7 +1231,7 @@ void String::enumerateLines(
 				--qlinesleft;
 			}
 			if (!hidden) {
-				const auto lineGeometry = resolveLineGeometry(
+				const auto lineGeometry = resolveLineMetrics(
 					lineStart,
 					w->position(),
 					lineStartBlockHint);
@@ -1238,7 +1240,7 @@ void String::enumerateLines(
 					lineLeft + lineWidth - widthLeft,
 					top,
 					lineLeft + qpadding.left(),
-					top - lineGeometry.descent,
+					(top - lineGeometry.descent).toInt(),
 					paragraphRTL);
 			}
 			if (lineElided) {
@@ -1291,7 +1293,7 @@ void String::enumerateLines(
 		if (qlinesleft > 0) {
 			--qlinesleft;
 		}
-		const auto lineGeometry = resolveLineGeometry(
+		const auto lineGeometry = resolveLineMetrics(
 			lineStart,
 			w->position(),
 			lineStartBlockHint);
@@ -1300,7 +1302,7 @@ void String::enumerateLines(
 			lineLeft + lineWidth - widthLeft,
 			top,
 			lineLeft + qpadding.left(),
-			top - lineGeometry.descent,
+			(top - lineGeometry.descent).toInt(),
 			paragraphRTL);
 		if (lineElided) {
 			return withElided(true);
@@ -1323,7 +1325,7 @@ void String::enumerateLines(
 		lastWordStart_wLeft = widthLeft;
 	}
 	if (widthLeft < lineWidth) {
-		const auto lineGeometry = resolveLineGeometry(
+		const auto lineGeometry = resolveLineMetrics(
 			lineStart,
 			_text.size(),
 			lineStartBlockHint);
@@ -1344,7 +1346,7 @@ void String::enumerateLines(
 			lineLeft + lineWidth - widthLeft,
 			top + useLineHeight + qpadding.bottom(),
 			lineLeft + qpadding.left(),
-			top + std::min(lineGeometry.ascent, useLineHeight),
+			top + std::min(lineGeometry.ascent.toInt(), useLineHeight),
 			paragraphRTL);
 	}
 	return withElided(false);
@@ -1651,16 +1653,37 @@ const QString &String::quoteHeaderText(QuoteDetails *quote) const {
 		: quote->language;
 }
 
-int String::blockBaselineShift(const AbstractBlock *block) const {
+QFixed String::blockBaselineShift(const AbstractBlock *block) const {
 	const auto flags = block->flags();
-	return (flags & TextBlockFlag::Subscript)
-		? int(base::SafeRound(_st->font->size() / 4.))
-		: (flags & TextBlockFlag::Superscript)
-		? -int(base::SafeRound(_st->font->size() / 3.))
-		: 0;
+	const auto subscript = (flags & TextBlockFlag::Subscript);
+	const auto superscript = (flags & TextBlockFlag::Superscript);
+	if (!subscript && !superscript) {
+		return QFixed();
+	} else if (_st->qtextEditLineMetrics) {
+		const auto font = WithFlags(_st->font, flags);
+		const auto &metrics = font->metrics();
+		const auto height = QFixed::fromReal(
+			metrics.ascent() + metrics.descent());
+		return subscript ? (height / 6) : -(height / 2);
+	}
+	return subscript
+		? QFixed(int(base::SafeRound(_st->font->size() / 4.)))
+		: -QFixed(int(base::SafeRound(_st->font->size() / 3.)));
 }
 
-String::LineGeometry String::defaultLineGeometry() const {
+String::LineMetrics String::defaultLineMetrics() const {
+	if (_st->qtextEditLineMetrics) {
+		const auto lineHeight = QFixed(this->lineHeight());
+		const auto leading = std::max(_st->font->fleading, QFixed());
+		const auto ascent = std::clamp(
+			(lineHeight * 4 / 5) - leading,
+			QFixed(),
+			lineHeight);
+		return {
+			.ascent = ascent,
+			.descent = lineHeight - ascent,
+		};
+	}
 	const auto lineHeight = this->lineHeight();
 	const auto fontHeight = _st->font->height;
 	const auto top = std::max(lineHeight - fontHeight, 0) / 2;
@@ -1670,11 +1693,11 @@ String::LineGeometry String::defaultLineGeometry() const {
 	};
 }
 
-String::LineGeometry String::resolveLineGeometry(
+String::LineMetrics String::resolveLineMetrics(
 		int lineStart,
 		int lineEnd,
 		int blockIndexHint) const {
-	auto result = defaultLineGeometry();
+	auto result = defaultLineMetrics();
 	if (lineStart >= lineEnd) {
 		return result;
 	}
@@ -1687,13 +1710,15 @@ String::LineGeometry String::resolveLineGeometry(
 		const auto raw = i->get();
 		const auto flags = raw->flags();
 		if (_hasSubscriptsOrSuperscripts
+			&& !_st->qtextEditLineMetrics
 			&& (raw->type() == TextBlockType::Text)
 			&& (flags
 				& (TextBlockFlag::Subscript | TextBlockFlag::Superscript))) {
 			const auto font = WithFlags(_st->font, raw->flags());
 			const auto shift = blockBaselineShift(raw);
-			accumulate_max(result.ascent, font->ascent - shift);
-			accumulate_max(result.descent, font->descent + shift);
+			const auto descent = font->height - font->fascent;
+			accumulate_max(result.ascent, font->fascent - shift);
+			accumulate_max(result.descent, descent + shift);
 		}
 		const auto custom = BlockCustomEmoji(raw);
 		if (!custom) {
@@ -1703,8 +1728,8 @@ String::LineGeometry String::resolveLineGeometry(
 		if (!vertical) {
 			continue;
 		}
-		accumulate_max(result.ascent, vertical->ascent);
-		accumulate_max(result.descent, vertical->descent);
+		accumulate_max(result.ascent, QFixed(vertical->ascent));
+		accumulate_max(result.descent, QFixed(vertical->descent));
 	}
 	return result;
 }
@@ -2055,15 +2080,23 @@ TextForMimeData String::toText(
 			? QStringView(entity.data).mid(0, entity.data.size())
 			: inText;
 		const auto customTextLink = (entity.type == EntityType::CustomUrl);
+		auto entityData = entity.data;
+		if (customTextLink) {
+			if (const auto external = UrlClickHandler::ExternalUrlFromInternalUrl(
+					entityData);
+					!external.isEmpty()) {
+				entityData = external;
+			}
+		}
 		const auto internalLink = customTextLink
-			&& entity.data.startsWith(qstr("internal:"));
+			&& entityData.startsWith(u"internal:"_q);
 		if (composeExpanded) {
 			const auto sameAsTextLink = customTextLink
-				&& (entity.data
+				&& (entityData
 					== UrlClickHandler::EncodeForOpening(full.toString()));
 			if (customTextLink && !internalLink && !sameAsTextLink) {
-				const auto &url = entity.data;
-				result.expanded.append(qstr(" (")).append(url).append(')');
+				const auto &url = entityData;
+				result.expanded.append(u" ("_q).append(url).append(')');
 			}
 		}
 		if (composeEntities && !internalLink) {
@@ -2071,7 +2104,7 @@ TextForMimeData String::toText(
 				entity.type,
 				linkStart,
 				int(result.rich.text.size() - linkStart),
-				entity.data });
+				entityData });
 		}
 	};
 	const auto appendPartCallback = [&](
@@ -2156,7 +2189,11 @@ IsolatedEmoji String::toIsolatedEmoji() const {
 }
 
 int String::lineHeight() const {
-	return _st->lineHeight ? _st->lineHeight : _st->font->height;
+	return _st->qtextEditLineMetrics
+		? std::max(_st->lineHeight, _st->font->height)
+		: _st->lineHeight
+		? _st->lineHeight
+		: _st->font->height;
 }
 
 void String::clear() {

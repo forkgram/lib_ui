@@ -12,6 +12,8 @@
 #include <QtGui/QFont>
 #include <QtGui/QFontMetrics>
 
+#include <private/qfixed_p.h>
+
 #include <cmath>
 
 namespace style {
@@ -110,6 +112,9 @@ public:
 			Qt::TextElideMode mode = Qt::ElideRight) const {
 		return _m.elidedText(str, mode, width);
 	}
+	[[nodiscard]] const QFontMetricsF &metrics() const {
+		return _m;
+	}
 
 	[[nodiscard]] Font bold(bool set = true) const;
 	[[nodiscard]] Font italic(bool set = true) const;
@@ -128,6 +133,9 @@ public:
 	int descent = 0;
 	int spacew = 0;
 	int elidew = 0;
+
+	QFixed fascent = 0;
+	QFixed fleading = 0;
 
 private:
 	friend class OwnedFont;
