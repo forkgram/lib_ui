@@ -461,7 +461,9 @@ std::array<QImage, 4> PrepareCorners(
 		return {};
 	}
 	const auto size = reader.size();
-	if (size.width() * size.height() > kReadMaxArea) {
+	if (size.width() <= 0
+		|| size.height() <= 0
+		|| (qint64(size.width()) * size.height() > kReadMaxArea)) {
 		return {};
 	}
 	auto result = ReadResult();

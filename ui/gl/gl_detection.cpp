@@ -12,6 +12,10 @@
 #include "base/options.h"
 #include "base/platform/base_platform_info.h"
 
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
+#include "base/platform/linux/base_linux_library.h"
+#endif // !Q_OS_MAC && !Q_OS_WIN
+
 #include <QtCore/QSet>
 #include <QtCore/QFile>
 #include <QtCore/QLibraryInfo>
@@ -33,6 +37,14 @@
 #include <QtGui/QSurfaceFormat>
 #endif // !Q_OS_MAC && !Q_OS_WIN
 #endif // Qt >= 6.7
+
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
+extern "C" {
+void _libOpenGL_so_tramp_resolve_all(void) __attribute__((weak));
+void _libEGL_so_tramp_resolve_all(void) __attribute__((weak));
+void _libGLX_so_tramp_resolve_all(void) __attribute__((weak));
+} // extern "C"
+#endif // !Q_OS_MAC && !Q_OS_WIN
 
 #define LOG_ONCE(x) [[maybe_unused]] static auto logged = [&] { LOG(x); return true; }();
 
@@ -76,6 +88,29 @@ void CrashCheckStart() {
 		f.write("1", 1);
 		f.close();
 	}
+}
+
+[[nodiscard]] bool OpenGLLibraryAvailable() {
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
+	static const auto available = [] {
+		const auto check = [](void (*tramp)(), const char *name) {
+			return !tramp
+				|| (base::Platform::LoadLibrary(name, RTLD_NODELETE)
+					!= nullptr);
+		};
+		if (!check(_libOpenGL_so_tramp_resolve_all, "libOpenGL.so.0")) {
+			return false;
+		} else if (Platform::IsWayland()) {
+			return check(_libEGL_so_tramp_resolve_all, "libEGL.so.1");
+		} else if (Platform::IsX11()) {
+			return check(_libGLX_so_tramp_resolve_all, "libGLX.so.0");
+		}
+		return true;
+	}();
+	return available;
+#else // !Q_OS_MAC && !Q_OS_WIN
+	return true;
+#endif // Q_OS_MAC || Q_OS_WIN
 }
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
@@ -135,7 +170,7 @@ void CrashCheckStart() {
 const char kOptionUseQtRhi[] = "use-qt-rhi";
 
 Capabilities CheckCapabilities(QWidget *widget) {
-	if (WidgetsRhiEnabled()) {
+	if (WidgetsRhiSupported()) {
 		return {};
 	}
 	if (!Platform::IsMac()) {
@@ -144,6 +179,9 @@ Capabilities CheckCapabilities(QWidget *widget) {
 			return {};
 		} else if (LastCheckCrashed) {
 			LOG_ONCE(("OpenGL: Last-crashed."));
+			return {};
+		} else if (!OpenGLLibraryAvailable()) {
+			LOG_ONCE(("OpenGL: Library not available."));
 			return {};
 		}
 	}
@@ -281,7 +319,7 @@ Capabilities CheckCapabilities(QWidget *widget) {
 }
 
 Backend ChooseBackendDefault(Capabilities capabilities) {
-	if (WidgetsRhiEnabled()) {
+	if (WidgetsRhiSupported()) {
 		return Backend::QRhi;
 	}
 	const auto use = ::Platform::IsMac()
@@ -294,15 +332,42 @@ Backend ChooseBackendDefault(Capabilities capabilities) {
 
 bool WidgetsRhiEnabled() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	return OptionUseQtRhi.value();
+	if (!OptionUseQtRhi.value()) {
+		return false;
+	} else if (!Platform::IsMac()) {
+		if (ForceDisabled
+			|| LastCrashCheckFailed()
+			|| !OpenGLLibraryAvailable()) {
+			return false;
+		}
+	}
+	return true;
 #else
 	return false;
 #endif
 }
 
+bool WidgetsRhiSupported() {
+	return WidgetsRhiEnabled() && CheckRhiCapabilities().supported;
+}
+
 RhiCapabilities CheckRhiCapabilities() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	static const auto result = ProbeRhiCapabilities();
+	static const auto result = [] {
+		if (!Platform::IsMac()) {
+			if (ForceDisabled
+				|| LastCrashCheckFailed()
+				|| !OpenGLLibraryAvailable()) {
+				return RhiCapabilities();
+			}
+			CrashCheckStart();
+		}
+		const auto value = ProbeRhiCapabilities();
+		if (!Platform::IsMac()) {
+			CrashCheckFinish();
+		}
+		return value;
+	}();
 	return result;
 #else
 	return {};
