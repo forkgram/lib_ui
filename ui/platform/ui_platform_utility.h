@@ -52,18 +52,12 @@ struct ForeignParent {
 			|| ((type == Type::Wayland) && !wayland.isEmpty());
 	}
 };
-[[nodiscard]] std::optional<QRect> ForeignWindowGeometry(
-	const ForeignParent &parent);
 void SetForeignTransientParent(
 	not_null<QWidget*> widget,
 	const ForeignParent &parent);
 void AcceptAllMouseInput(not_null<QWidget*> widget);
 
 void DisableSystemWindowResize(not_null<QWidget*> widget, QSize ratio);
-
-[[nodiscard]] std::optional<bool> IsOverlapped(
-	not_null<QWidget*> widget,
-	const QRect &rect);
 
 [[nodiscard]] constexpr bool UseMainQueueGeneric();
 void DrainMainQueue(); // Needed only if UseMainQueueGeneric() is false.

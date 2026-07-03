@@ -8,12 +8,13 @@
 
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
-#include "base/platform/base_platform_info.h"
+#include "base/options.h"
 #include "base/qt/qt_common_adapters.h"
 #include "styles/style_widgets.h"
 
 #include <QtGui/QWindow>
 #include <QtCore/QtMath>
+#include <QtWidgets/QScroller>
 #include <QtWidgets/QApplication>
 
 namespace Ui {
@@ -364,6 +365,36 @@ ElasticScroll::ElasticScroll(
 	) | rpl::on_next([=](int from) {
 		tryScrollTo(from, false);
 	}, _bar->lifetime());
+
+	static const auto &OptionQScroller = base::options::lookup<bool>(
+		kOptionQScroller);
+
+	rpl::single(
+		rpl::empty
+	) | rpl::then(
+		OptionQScroller.changes()
+	) | rpl::on_next([=] {
+		if (OptionQScroller.value()) {
+			_scroller = QScroller::scroller(this);
+			SetupScrollerPhysics(_scroller, false);
+		} else if (_scroller) {
+			QObject deleter;
+			_scroller->setParent(&deleter);
+		}
+
+		if (!_scroller) {
+			return;
+		}
+
+		connect(
+			_scroller,
+			&QScroller::stateChanged,
+			[=](QScroller::State state) {
+				if (state == QScroller::Scrolling) {
+					ScrollerStopper::Instance().activate(_scroller);
+				}
+			});
+	}, lifetime());
 }
 
 ElasticScroll::~ElasticScroll() {
@@ -618,6 +649,38 @@ bool ElasticScroll::eventHook(QEvent *e) {
 		}
 		return true;
 	}
+	switch (e->type()) {
+	case QEvent::ScrollPrepare: {
+		QScrollPrepareEvent *se = static_cast<QScrollPrepareEvent *>(e);
+		se->setViewportSize(QSizeF(viewport()->size()));
+		se->setContentPosRange(QRectF(
+			0,
+			0,
+			_vertical ? 0 : _state.fullSize - width(),
+			_vertical ? _state.fullSize - height() : 0));
+		se->setContentPos(QPointF(
+			_vertical ? 0 : _state.visibleFrom,
+			_vertical ? _state.visibleFrom : 0));
+		se->accept();
+		return true;
+	}
+	case QEvent::Scroll: {
+		QScrollEvent *se = static_cast<QScrollEvent *>(e);
+		const auto state = _scroller->state();
+		const auto phase = state == QScroller::Pressed
+			? Qt::ScrollBegin
+			: state == QScroller::Dragging
+			? Qt::ScrollUpdate
+			: state == QScroller::Scrolling
+			? Qt::ScrollMomentum
+			: Qt::ScrollEnd;
+		const auto pixels
+			= (se->contentPos() + se->overshootDistance()).toPoint();
+		const auto delta
+			= -(_state.visibleFrom - (_vertical ? pixels.y() : pixels.x()));
+		return handleScrollEvent(phase, delta);
+	}
+	}
 	return RpWidget::eventHook(e);
 }
 
@@ -668,13 +731,44 @@ bool ElasticScroll::handleWheelEvent(not_null<QWheelEvent*> e, bool touch) {
 		return true;
 	}
 	const auto phase = e->phase();
-	const auto momentum = (phase == Qt::ScrollMomentum)
-		|| (phase == Qt::ScrollEnd);
+	auto ownAxisLocked = false;
+	if (_wheelDirectionLocked || _crossAxisWheelProcess) {
+		const auto lockDelta = ScrollDeltaF(e, touch);
+		const auto locked = _wheelDirectionLocked
+			? _wheelDirectionLock.update(phase, lockDelta)
+			: std::nullopt;
+		if (!_wheelDirectionLocked || phase == Qt::NoScrollPhase) {
+			const auto own = _vertical ? lockDelta.y() : lockDelta.x();
+			const auto cross = _vertical ? lockDelta.x() : lockDelta.y();
+			if (std::abs(cross) > std::abs(own)
+				&& _crossAxisWheelProcess
+				&& _crossAxisWheelProcess(lockDelta.toPoint())) {
+				return true;
+			}
+		} else if (locked
+			&& ((*locked == Qt::Horizontal) == _vertical)) {
+			if (_crossAxisWheelProcess) {
+				_crossAxisWheelProcess(_vertical
+					? QPoint(qRound(lockDelta.x()), 0)
+					: QPoint(0, qRound(lockDelta.y())));
+			}
+			return true;
+		} else {
+			ownAxisLocked = locked.has_value();
+		}
+	}
 	const auto now = crl::now();
 	const auto guard = gsl::finally([&] {
 		_lastScroll = now;
 	});
-	const auto unmultiplied = ScrollDelta(e, touch);
+	auto unmultiplied = ScrollDelta(e, touch);
+	if (ownAxisLocked) {
+		if (_vertical) {
+			unmultiplied.setX(0);
+		} else {
+			unmultiplied.setY(0);
+		}
+	}
 	const auto multiply = e->modifiers()
 		& (Qt::ControlModifier | Qt::ShiftModifier);
 	const auto pixels = multiply
@@ -684,17 +778,10 @@ bool ElasticScroll::handleWheelEvent(not_null<QWheelEvent*> e, bool touch) {
 		: unmultiplied;
 	auto ignore = false;
 	auto delta = _vertical ? -pixels.y() : -pixels.x();
-	if (std::abs(_vertical ? pixels.x() : pixels.y()) >= std::abs(delta)) {
+	if (!ownAxisLocked
+		&& std::abs(_vertical ? pixels.x() : pixels.y()) >= std::abs(delta)) {
 		ignore = true;
 		delta = 0;
-	}
-	if (_ignoreMomentumFromOverscroll) {
-		if (!momentum) {
-			_ignoreMomentumFromOverscroll = 0;
-		} else if (!_overscrollReturnAnimation.animating()
-			&& !base::OppositeSigns(_ignoreMomentumFromOverscroll, delta)) {
-			return true;
-		}
 	}
 	if (phase == Qt::NoScrollPhase) {
 		if (_overscroll == currentOverscrollDefault()) {
@@ -704,6 +791,63 @@ bool ElasticScroll::handleWheelEvent(not_null<QWheelEvent*> e, bool touch) {
 			overscrollReturn();
 		}
 		return true;
+	} else if (_scroller && !touch) {
+		switch (phase) {
+		case Qt::ScrollBegin:
+		case Qt::ScrollUpdate: {
+			if (phase == Qt::ScrollBegin
+				&& !pixels.isNull()
+				&& _scroller->state() == QScroller::Scrolling) {
+				// On macOS, when Qt loses the race detecting that a
+				// momentum phase follows the finger lift, the OS momentum
+				// stream leaks through as ScrollBegin + ScrollMomentum.
+				// A real begin (fingers resting on the pad) carries a
+				// zero delta, so a delta-carrying begin while our fling
+				// runs is that leak - pressing would catch and kill the
+				// fling. If this ever swallows a real begin, the next
+				// ScrollUpdate finds _wheelPos null and presses instead.
+				break;
+			}
+			const auto wasNull = _wheelPos.isNull();
+			if (wasNull) {
+				_wheelPos = QPoint(width(), height()) / 2;
+			} else {
+				_wheelPos += pixels;
+			}
+			_scroller->handleInput(wasNull
+				? QScroller::InputPress
+				: QScroller::InputMove, _wheelPos, now);
+		} break;
+		case Qt::ScrollEnd:
+		case Qt::ScrollMomentum: {
+			if (!_wheelPos.isNull()) {
+				_scroller->handleInput(
+					QScroller::InputRelease,
+					_wheelPos,
+					now);
+				_wheelPos = {};
+			}
+		} break;
+		}
+		return true;
+	}
+	return handleScrollEvent(phase, delta, ignore, touch);
+}
+
+bool ElasticScroll::handleScrollEvent(
+		Qt::ScrollPhase phase,
+		int delta,
+		bool ignore,
+		bool touch) {
+	const auto momentum = (phase == Qt::ScrollMomentum)
+		|| (phase == Qt::ScrollEnd);
+	if (_ignoreMomentumFromOverscroll) {
+		if (!momentum) {
+			_ignoreMomentumFromOverscroll = 0;
+		} else if (!_overscrollReturnAnimation.animating()
+			&& !base::OppositeSigns(_ignoreMomentumFromOverscroll, delta)) {
+			return true;
+		}
 	}
 	if (!momentum) {
 		overscrollReturnCancel();
@@ -1073,6 +1217,15 @@ void ElasticScroll::setBarTopInset(int inset) {
 	resizeEvent(&event);
 }
 
+void ElasticScroll::setBarBottomInset(int inset) {
+	if (_barBottomInset == inset) {
+		return;
+	}
+	_barBottomInset = inset;
+	auto event = QResizeEvent(size(), size());
+	resizeEvent(&event);
+}
+
 void ElasticScroll::resizeEvent(QResizeEvent *e) {
 	const auto rtl = (layoutDirection() == Qt::RightToLeft);
 	_bar->setGeometry(_vertical
@@ -1080,7 +1233,7 @@ void ElasticScroll::resizeEvent(QResizeEvent *e) {
 			(rtl ? 0 : (width() - _st.width)),
 			_barTopInset,
 			_st.width,
-			std::max(0, height() - _barTopInset))
+			std::max(0, height() - _barTopInset - _barBottomInset))
 		: QRect(0, height() - _st.width, width(), _st.width));
 	_geometryChanged.fire({});
 	updateState();
@@ -1110,6 +1263,10 @@ void ElasticScroll::keyPressEvent(QKeyEvent *e) {
 			? style::ConvertScale(20)
 			: height();
 		tryScrollTo(_state.visibleFrom + (up ? -step : step));
+	} else {
+		// Let keys we don't handle (e.g. typed characters) propagate to
+		// the parent widget instead of being silently accepted here.
+		e->ignore();
 	}
 }
 

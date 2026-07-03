@@ -1006,7 +1006,7 @@ void SeparatePanel::setAnchorData(
 		_transientParent = std::move(transientParent);
 		_foreignTransientParentApplied = false;
 		if (!_transientParent && windowHandle()) {
-			Platform::ClearTransientParent(this);
+			Platform::SetForeignTransientParent(this, _transientParent);
 		}
 	}
 }
@@ -1458,7 +1458,18 @@ void SeparatePanel::initGeometry(QSize size) {
 		} else {
 			setFixedSize(rect.size());
 		}
-		Ui::SetGeometryAndScreen(this, rect);
+		if (!anchor && _transientParent) {
+			// Don't set the position, so that the WM/compositor itself
+			// places us relative to the transient parent (on X11 that
+			// requires not setting the position hint). WA_Moved is already
+			// set by RpWidget constructor's zero setGeometry call, so it
+			// must be cleared back, otherwise QWidgetPrivate::create
+			// passes the position to the QWindow.
+			resize(rect.size());
+			setAttribute(Qt::WA_Moved, false);
+		} else {
+			Ui::SetGeometryAndScreen(this, rect);
+		}
 		updateControlsGeometry();
 	}
 }

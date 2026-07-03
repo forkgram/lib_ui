@@ -8,12 +8,9 @@
 
 #include "base/platform/base_platform_info.h"
 #include "base/platform/linux/base_linux_xdp_utilities.h"
+#include "base/platform/linux/base_linux_xsettings.h"
 
 #include "base/integration.h"
-
-#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
-#include "base/platform/linux/base_linux_xsettings.h"
-#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 namespace Ui {
 namespace Platform {
@@ -33,7 +30,6 @@ private:
 TitleControlsLayoutImpl::TitleControlsLayoutImpl()
 : TitleControlsLayout(Get())
 , _lifetime([&] {
-#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 	using base::Platform::XCB::XSettings;
 	if (const auto xSettings = XSettings::Instance()) {
 		return xSettings->registerCallbackForProperty(
@@ -44,7 +40,6 @@ TitleControlsLayoutImpl::TitleControlsLayoutImpl()
 				});
 			});
 	}
-#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 	return rpl::lifetime();
 }())
 , _settingWatcher("org.gnome.desktop.wm.preferences", "button-layout", [=] {
@@ -94,7 +89,6 @@ TitleControls::Layout TitleControlsLayoutImpl::Get() {
 		return result;
 	};
 
-#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 	const auto xSettingsResult = [&]()
 	-> std::optional<TitleControls::Layout> {
 		using base::Platform::XCB::XSettings;
@@ -116,7 +110,6 @@ TitleControls::Layout TitleControlsLayoutImpl::Get() {
 	if (xSettingsResult.has_value()) {
 		return *xSettingsResult;
 	}
-#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 	const auto portalResult = [&]() -> std::optional<TitleControls::Layout> {
 		auto decorationLayout = base::Platform::XDP::ReadSetting(

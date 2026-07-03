@@ -374,6 +374,7 @@ struct AccessibilityState {
 	bool checked : 1 = false;
 	bool pressed : 1 = false;
 	bool readOnly : 1 = false;
+	bool selectable : 1 = false;
 	bool selected : 1 = false;
 
 	void writeTo(QAccessible::State &state);
@@ -415,6 +416,24 @@ public:
 	[[nodiscard]] virtual QStringList accessibilityActionNames();
 	virtual void accessibilityDoAction(const QString &name);
 	[[nodiscard]] virtual int accessibilityChildCount() const;
+
+	// Real child widgets in accessibility (visual) order, when it differs from
+	// the QObject child order (e.g. a reorderable VerticalLayout). Empty means
+	// use the default QWidget enumeration.
+	[[nodiscard]] virtual std::vector<not_null<QWidget*>> accessibilityChildWidgets() const;
+
+	// Orientation of an ordered container (e.g. a list), exposed to UIA so a
+	// screen reader can announce a horizontal/vertical arrangement. nullopt (the
+	// default) means the widget reports no orientation.
+	[[nodiscard]] virtual std::optional<Qt::Orientation> accessibilityOrientation() const;
+
+	// Opt-in for a single-selection list whose accessible focus tracks its
+	// selected item: the accessible wrapper exposes QAccessibleSelectionInterface
+	// and forwards container SetFocus/focusChild to the selected child. Default
+	// false - a plain list (e.g. message history, which keeps focus and selection
+	// separate) must not get this behaviour just from reporting the List role.
+	[[nodiscard]] virtual bool accessibilitySelectionList() const;
+
 	[[nodiscard]] virtual RpWidget *accessibilityParent() const;
 	[[nodiscard]] virtual QAccessibleInterface* accessibilityChildInterface(int index) const;
 	[[nodiscard]] virtual QString accessibilityChildName(int index) const;
@@ -432,6 +451,31 @@ public:
 	[[nodiscard]] virtual QString accessibilityChildSubItemName(int row, int column) const;
 	[[nodiscard]] virtual QString accessibilityChildSubItemValue(int row, int column) const;
 	void accessibilityChildFocused(int index);
+
+	// Per-child opt-in for the accessibility action interface (SetFocus /
+	// Invoke / SelectionItem.Select). Returns false by default, so painted
+	// lists do not advertise actions they cannot perform. A widget that
+	// returns true must support all three meaningfully, because the Windows
+	// UIA bridge exposes SetFocus and SelectionItem regardless of
+	// actionNames() once an action interface is present.
+	[[nodiscard]] virtual bool accessibilityChildSupportsActions(
+		int index) const;
+
+	// Stable identity of a child, used to keep an action bound to the row the
+	// assistive technology actually referenced even if the model reorders or
+	// replaces the row at that index. Returns 0 ("no stable identity") by
+	// default; a widget opting into actions must provide a non-zero token and
+	// implement accessibilityChildIndexByIdentity().
+	[[nodiscard]] virtual quintptr accessibilityChildIdentity(
+		int index) const;
+	[[nodiscard]] virtual int accessibilityChildIndexByIdentity(
+		quintptr identity) const;
+
+	// Actions are dispatched by stable identity (resolved on the main thread
+	// by the owner) rather than by index, so a queued action never operates
+	// on a replacement row.
+	virtual void accessibilityChildSetFocus(quintptr identity);
+	virtual void accessibilityChildActivate(quintptr identity);
 
 protected:
 	// e - from enterEvent() of child RpWidget

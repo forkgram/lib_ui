@@ -8,16 +8,27 @@
 
 #include "ui/painter.h"
 #include "ui/ui_utility.h"
+#include "base/platform/base_platform_info.h"
 #include "base/qt/qt_common_adapters.h"
 #include "base/debug_log.h"
+#include "base/options.h"
 
 #include <QtWidgets/QScrollBar>
+#include <QtWidgets/QScroller>
+#include <QtWidgets/QScrollerProperties>
 #include <QtWidgets/QApplication>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 
 namespace Ui {
 namespace {
+
+base::options::toggle OptionQScroller({
+	.id = kOptionQScroller,
+	.name = "Use QScroller for touchpad scrolling",
+	.description = "Provides kinetic scrolling and overscroll",
+	.defaultValue = Platform::IsLinux(),
+});
 
 [[nodiscard]] int ComputeScrollTo(
 		int toFrom,
@@ -57,6 +68,78 @@ namespace {
 }
 
 } // namespace
+
+const char kOptionQScroller[] = "qscroller";
+
+void SetupScrollerPhysics(not_null<QScroller*> scroller, bool ownsOvershoot) {
+	auto props = scroller->scrollerProperties();
+	using P = QScrollerProperties;
+	const auto set = [&](P::ScrollMetric metric, qreal value) {
+		props.setScrollMetric(metric, QVariant::fromValue(value));
+	};
+
+	// Momentum (both consumers). The Qt default 0.125 gives a ~4s, slippery,
+	// constant-deceleration glide that "never slows down". With the default
+	// OutQuad curve coast time ~= |v| / DecelerationFactor, so 0.6 brings a
+	// hard flick down to ~1-1.6s, close to macOS native momentum.
+	set(P::DecelerationFactor, 0.6);
+	// The default cap 0.5 m/s (~2165 px/s at ~110dpi) clips hard flicks below
+	// the legacy 2500-4000 px/s feel. NB: this metric is m/s, converted to
+	// pixels via pixelPerMeter = physicalDPI / 0.0254.
+	set(P::MaximumVelocity, 0.95);
+
+	if (ownsOvershoot) {
+		// Raw QScroller overshoot path (ScrollArea). ElasticScroll instead
+		// re-shapes overshootDistance() through its own logarithmic
+		// rubber-band, so there we leave the QScroller overshoot at default.
+		set(P::OvershootDragResistanceFactor, 0.30); // lower = stiffer
+		set(P::OvershootDragDistanceFactor, 0.20); // <= 20% viewport (was 1.0)
+		set(P::OvershootScrollDistanceFactor, 0.16); // <= 16% viewport (was 0.5)
+		set(P::OvershootScrollTime, 0.36); // bounce-back ~250ms (was ~490ms)
+	}
+
+	scroller->setScrollerProperties(props);
+}
+
+ScrollerStopper::ScrollerStopper()
+: _mousePos(QCursor::pos()) {
+	qApp->installEventFilter(this);
+}
+
+ScrollerStopper &ScrollerStopper::Instance() {
+	static ScrollerStopper instance;
+	return instance;
+}
+
+void ScrollerStopper::activate(not_null<QScroller*> scroller) {
+	Expects(scroller->state() == QScroller::Scrolling);
+	_active = {
+		scroller.get(),
+		connect(
+			scroller,
+			&QScroller::stateChanged,
+			[=] { _active = {}; }),
+	};
+}
+
+bool ScrollerStopper::eventFilter(QObject *obj, QEvent *e) {
+	const auto type = e->type();
+	if (type != QEvent::MouseMove && type != QEvent::MouseButtonPress) {
+		return false;
+	}
+	const auto ev = static_cast<QMouseEvent*>(e);
+	if (type == QEvent::MouseMove) {
+		if (_mousePos == ev->globalPos()) {
+			return false;
+		}
+		_mousePos = ev->globalPos();
+	}
+	if (!_active.scroller) {
+		return false;
+	}
+	_active.scroller->stop();
+	return true;
+}
 
 // flick scroll taken from http://qt-project.org/doc/qt-4.8/demos-embedded-anomaly-src-flickcharm-cpp.html
 
@@ -107,14 +190,24 @@ void ScrollBar::recountSize() {
 	setGeometry(_vertical
 		? QRect(
 			style::RightToLeft() ? 0 : (area()->width() - _st->width),
-			_st->deltat,
+			_st->deltat + _topSkip,
 			_st->width,
-			area()->height() - _st->deltat - _st->deltab)
+			std::max(
+				area()->height() - _st->deltat - _st->deltab - _topSkip,
+				0))
 		: QRect(
 			_st->deltat,
 			area()->height() - _st->width,
 			area()->width() - _st->deltat - _st->deltab,
 			_st->width));
+}
+
+void ScrollBar::setTopSkip(int skip) {
+	if (_topSkip != skip) {
+		_topSkip = skip;
+		recountSize();
+		updateBar(true);
+	}
 }
 
 void ScrollBar::updateBar(bool force) {
@@ -425,6 +518,35 @@ ScrollArea::ScrollArea(
 		_touchTimer.setCallback([=] { _touchRightButton = true; });
 		_touchScrollTimer.setCallback([=] { touchScrollTimer(); });
 	}
+
+	rpl::single(
+		rpl::empty
+	) | rpl::then(
+		OptionQScroller.changes()
+	) | rpl::on_next([=] {
+		if (OptionQScroller.value()) {
+			_scroller = QScroller::scroller(this);
+			SetupScrollerPhysics(_scroller, true);
+			_overscrollAllowedApplied = -1;
+			_overscrollDirection = 0;
+		} else if (_scroller) {
+			QObject deleter;
+			_scroller->setParent(&deleter);
+		}
+
+		if (!_scroller) {
+			return;
+		}
+
+		connect(
+			_scroller,
+			&QScroller::stateChanged,
+			[=](QScroller::State state) {
+				if (state == QScroller::Scrolling) {
+					ScrollerStopper::Instance().activate(_scroller);
+				}
+			});
+	}, lifetime());
 }
 
 void ScrollArea::touchDeaccelerate(int32 elapsed) {
@@ -432,6 +554,45 @@ void ScrollArea::touchDeaccelerate(int32 elapsed) {
 	int32 y = _touchSpeed.y();
 	_touchSpeed.setX((x == 0) ? x : (x > 0) ? qMax(0, x - elapsed) : qMin(0, x + elapsed));
 	_touchSpeed.setY((y == 0) ? y : (y > 0) ? qMax(0, y - elapsed) : qMin(0, y + elapsed));
+}
+
+void ScrollArea::setOverscrollEdges(
+		Fn<bool()> allowTop,
+		Fn<bool()> allowBottom) {
+	_overscrollAllowTop = std::move(allowTop);
+	_overscrollAllowBottom = std::move(allowBottom);
+	// Re-evaluate against the new predicates at the next scroll start.
+	_overscrollDirection = 0;
+}
+
+void ScrollArea::updateOverscrollByDirection(int wheelDeltaY) {
+	if (!_scroller || !wheelDeltaY) {
+		return;
+	}
+	// ScrollDelta().y() > 0 means we're heading toward the top edge.
+	const auto direction = (wheelDeltaY > 0) ? -1 : 1;
+	if (_overscrollDirection == direction) {
+		return;
+	}
+	_overscrollDirection = direction;
+	const auto &predicate = (direction < 0)
+		? _overscrollAllowTop
+		: _overscrollAllowBottom;
+	applyOverscrollAllowed(!predicate || predicate());
+}
+
+void ScrollArea::applyOverscrollAllowed(bool allowed) {
+	if (!_scroller || (_overscrollAllowedApplied == (allowed ? 1 : 0))) {
+		return;
+	}
+	_overscrollAllowedApplied = allowed ? 1 : 0;
+	auto props = _scroller->scrollerProperties();
+	props.setScrollMetric(
+		QScrollerProperties::VerticalOvershootPolicy,
+		QVariant::fromValue(allowed
+			? QScrollerProperties::OvershootWhenScrollable
+			: QScrollerProperties::OvershootAlwaysOff));
+	_scroller->setScrollerProperties(props);
 }
 
 void ScrollArea::scrolled() {
@@ -589,9 +750,82 @@ bool ScrollArea::viewportEvent(QEvent *e) {
 	if (filterOutTouchEvent(e)) {
 		return true;
 	} else if (e->type() == QEvent::Wheel) {
-		if (_customWheelProcess
-			&& _customWheelProcess(static_cast<QWheelEvent*>(e))) {
+		const auto ev = static_cast<QWheelEvent*>(e);
+		if (_customWheelProcess && _customWheelProcess(ev)) {
 			return true;
+		}
+		if (_wheelDirectionLocked || _crossAxisWheelProcess) {
+			const auto phase = ev->phase();
+			const auto delta = ScrollDeltaF(ev);
+			const auto locked = _wheelDirectionLocked
+				? _wheelDirectionLock.update(phase, delta)
+				: std::nullopt;
+			if (!_wheelDirectionLocked || phase == Qt::NoScrollPhase) {
+				if (std::abs(delta.x()) > std::abs(delta.y())
+					&& _crossAxisWheelProcess
+					&& _crossAxisWheelProcess(delta.toPoint())) {
+					return true;
+				}
+			} else if (locked == Qt::Horizontal) {
+				if (_crossAxisWheelProcess) {
+					_crossAxisWheelProcess({ qRound(delta.x()), 0 });
+				}
+				return true;
+			}
+		}
+		if (_scroller) {
+			switch (ev->phase()) {
+			case Qt::ScrollBegin:
+			case Qt::ScrollUpdate: {
+				if (ev->phase() == Qt::ScrollBegin
+					&& !ScrollDelta(ev).isNull()
+					&& _scroller->state() == QScroller::Scrolling) {
+					// On macOS, when Qt loses the race detecting that a
+					// momentum phase follows the finger lift, the OS
+					// momentum stream leaks through as ScrollBegin
+					// + ScrollMomentum. A real begin (fingers resting on
+					// the pad) carries a zero delta, so a delta-carrying
+					// begin while our fling runs is that leak - pressing
+					// would catch and kill the fling. If this ever
+					// swallows a real begin, the next ScrollUpdate finds
+					// _wheelPos null and presses instead.
+					return true;
+				}
+				updateOverscrollByDirection(ScrollDelta(ev).y());
+				const auto wasNull = _wheelPos.isNull();
+				if (wasNull) {
+					_wheelPos = QPoint(width(), height()) / 2;
+				} else {
+					auto unmultiplied = ScrollDelta(ev);
+					if (_wheelDirectionLocked) {
+						unmultiplied.setX(0);
+					}
+					const auto multiply = ev->modifiers()
+						& (Qt::ControlModifier | Qt::ShiftModifier);
+					_wheelPos += multiply
+						? QPoint(
+							unmultiplied.x() * std::max(width(), 120) / 120.,
+							unmultiplied.y() * std::max(height(), 120) / 120.)
+						: unmultiplied;
+				}
+				_scroller->handleInput(wasNull
+					? QScroller::InputPress
+					: QScroller::InputMove, _wheelPos, crl::now());
+			} return true;
+			case Qt::ScrollEnd:
+			case Qt::ScrollMomentum: {
+				if (!_wheelPos.isNull()) {
+					_scroller->handleInput(
+						QScroller::InputRelease,
+						_wheelPos,
+						crl::now());
+					_wheelPos = {};
+				}
+				// Re-evaluate the edge policy at the start of the next gesture;
+				// the policy applied for this gesture stays for the fling.
+				_overscrollDirection = 0;
+			} return true;
+			}
 		}
 	}
 	return QScrollArea::viewportEvent(e);
@@ -880,6 +1114,10 @@ void ScrollArea::rangeChanged(int oldMax, int newMax, bool vertical) {
 void ScrollArea::updateBars() {
 	_horizontalBar->updateBar(true);
 	_verticalBar->updateBar(true);
+}
+
+void ScrollArea::setVerticalBarTopSkip(int skip) {
+	_verticalBar->setTopSkip(skip);
 }
 
 bool ScrollArea::focusNextPrevChild(bool next) {

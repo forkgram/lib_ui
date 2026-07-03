@@ -8,6 +8,8 @@
 
 #include "ui/ui_utility.h"
 
+#include <QAccessible>
+
 namespace Ui {
 
 QMargins VerticalLayout::getMargins() const {
@@ -52,6 +54,13 @@ void VerticalLayout::reorderRows(int oldIndex, int newIndex) {
 
 	base::reorder(_rows, oldIndex, newIndex);
 	resizeToWidth(width());
+
+	// The accessible (visual) child order changed - tell screen readers. A
+	// subclass that exposes an accessibility role (so a custom accessible
+	// interface is built for it) reports children in visual order via
+	// accessibilityChildWidgets(); see Window::TabListLayout.
+	auto event = QAccessibleEvent(this, QAccessible::ObjectReorder);
+	QAccessible::updateAccessibility(&event);
 }
 
 int VerticalLayout::resizeGetHeight(int newWidth) {

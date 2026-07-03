@@ -251,11 +251,18 @@ public:
 	void setEditLanguageCallback(
 		Fn<void(QString now, Fn<void(QString)> save)> callback);
 
-	struct ExtendedContextMenu {
-		QMenu *menu = nullptr;
-		std::shared_ptr<QContextMenuEvent> event;
-		Fn<void(not_null<PopupMenu*>)> setupPopupMenu;
+	// A hook gets a chance to customize the popup menu the field is about to
+	// show. It runs synchronously during the menu build; for hooks that need
+	// async data before the menu can be shown (spell checking), call
+	// awaitAsyncWork() and invoke the returned callback once finished - the
+	// menu is shown only after every such callback has fired.
+	struct ContextMenuRequest {
+		not_null<QMenu*> menu;
+		not_null<QContextMenuEvent*> event;
+		Fn<void(Fn<void(not_null<PopupMenu*>)>)> customizePopupMenu;
+		Fn<Fn<void()>()> awaitAsyncWork;
 	};
+	using ContextMenuHook = Fn<void(ContextMenuRequest)>;
 
 	void setPlaceholderColorOverride(const style::color &color);
 
@@ -273,7 +280,7 @@ public:
 	[[nodiscard]] bool instantViewEditorTagsEnabled() const {
 		return _instantViewEditorTagsEnabled;
 	}
-	void setExtendedContextMenu(rpl::producer<ExtendedContextMenu> value);
+	void addContextMenuHook(ContextMenuHook hook);
 	void commitInstantReplacement(
 		int from,
 		int till,
@@ -283,6 +290,20 @@ public:
 		EditLinkSelection selection,
 		const TextWithTags &textWithTags,
 		const QString &link);
+	[[nodiscard]] InputFieldTextRange selectionEditMarkdownTagRange(
+		InputFieldTextRange selection,
+		const QString &tag) const;
+	void commitMarkdownTagEdit(
+		InputFieldTextRange range,
+		const QString &tag,
+		const QString &text);
+	[[nodiscard]] bool isMarkdownTagActive(const QString &tag) const;
+	[[nodiscard]] QString selectionMarkdownTagForToggle(
+		const QString &tag) const;
+	void toggleCurrentMarkdownTag(const QString &tag);
+	void clearCurrentMarkdown();
+	[[nodiscard]] bool hasCurrentMarkdownLink() const;
+	void editCurrentMarkdownLink();
 	[[nodiscard]] static bool IsValidMarkdownLink(QStringView link);
 	[[nodiscard]] static bool IsCustomEmojiLink(QStringView link);
 	[[nodiscard]] static QString CustomEmojiLink(QStringView entityData);
@@ -439,10 +460,7 @@ private:
 	void focusOutEventInner(QFocusEvent *e);
 	void setFocused(bool focused);
 	void keyPressEventInner(QKeyEvent *e);
-	void contextMenuEventInner(
-		QContextMenuEvent *e,
-		QMenu *m = nullptr,
-		Fn<void(not_null<PopupMenu*>)> setupPopupMenu = nullptr);
+	void contextMenuEventInner(QContextMenuEvent *e);
 	void dropEventInner(QDropEvent *e);
 	void inputMethodEventInner(QInputMethodEvent *e);
 	void paintEventInner(QPaintEvent *e);
@@ -663,6 +681,7 @@ private:
 	MimeDataHook _mimeDataHook;
 	rpl::event_stream<bool> _menuShownChanges;
 	base::unique_qptr<PopupMenu> _contextMenu;
+	std::vector<ContextMenuHook> _contextMenuHooks;
 
 	QTextCharFormat _defaultCharFormat;
 

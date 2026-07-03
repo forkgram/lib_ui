@@ -11,6 +11,7 @@
 #include "styles/style_widgets.h"
 
 #include <QtGui/QtEvents>
+#include <QAccessible>
 
 namespace Ui {
 namespace {
@@ -52,7 +53,29 @@ void SideBarButton::setActive(bool active) {
 		return;
 	}
 	_active = active;
+	if (isListItem()) {
+		// Announce selection via a dedicated selection event (the Windows
+		// bridge maps these to UIA_SelectionItem_ElementSelected); a generic
+		// state-change event is ignored for the selected state.
+		auto event = QAccessibleEvent(
+			this,
+			active ? QAccessible::SelectionAdd : QAccessible::SelectionRemove);
+		QAccessible::updateAccessibility(&event);
+	}
 	update();
+}
+
+AccessibilityState SideBarButton::accessibilityState() const {
+	// Merge the base state so plain buttons keep reporting `pressed`. A list
+	// item exposes the active one as selected - persistently, independent of
+	// keyboard focus. A locked (premium) folder stays a focusable, invokable
+	// list item but can never become current, so it isn't selectable.
+	auto state = RippleButton::accessibilityState();
+	if (isListItem()) {
+		state.selectable = !_lock.locked;
+		state.selected = _active;
+	}
+	return state;
 }
 
 void SideBarButton::setBadge(const QString &badge, bool muted) {

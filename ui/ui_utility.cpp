@@ -8,7 +8,6 @@
 
 #include "base/platform/base_platform_info.h"
 #include "ui/integration.h"
-#include "ui/platform/ui_platform_utility.h"
 #include "ui/style/style_core.h"
 
 #include <QtWidgets/QApplication>
@@ -209,39 +208,6 @@ QPixmap PixmapFromImage(QImage &&image) {
 	return QPixmap::fromImage(std::move(image), Qt::ColorOnly);
 }
 
-bool IsContentVisible(
-		not_null<QWidget*> widget,
-		const QRect &rect) {
-	Expects(widget->window()->windowHandle());
-
-	const auto activeOrNotOverlapped = [&] {
-		if (const auto active = widget->isActiveWindow()) {
-			return active;
-		} else if (Integration::Instance().screenIsLocked()) {
-			return false;
-		}
-
-		const auto mappedRect = rect.isNull()
-			? QRect(
-				widget->mapTo(widget->window(), QPoint()),
-				widget->size())
-			: QRect(
-				widget->mapTo(widget->window(), rect.topLeft()),
-				rect.size());
-
-		const auto overlapped = Platform::IsOverlapped(
-			widget->window(),
-			mappedRect);
-
-		return overlapped.has_value() && !*overlapped;
-	}();
-
-	return activeOrNotOverlapped
-		&& widget->isVisible()
-		&& !widget->window()->isMinimized()
-		&& widget->window()->windowHandle()->isExposed();
-}
-
 int WheelDirection(not_null<QWheelEvent*> e) {
 	// Only a mouse wheel is accepted.
 	constexpr auto step = static_cast<int>(QWheelEvent::DefaultDeltasPerStep);
@@ -301,6 +267,38 @@ QPointF ScrollDeltaF(not_null<QWheelEvent*> e, bool touch) {
 
 QPoint ScrollDelta(not_null<QWheelEvent*> e, bool touch) {
 	return ScrollDeltaF(e, touch).toPoint();
+}
+
+std::optional<Qt::Orientation> ScrollDirectionLock::update(
+		Qt::ScrollPhase phase,
+		QPointF delta) {
+	const auto axis = [&] {
+		return (std::abs(delta.x()) > std::abs(delta.y()))
+			? Qt::Horizontal
+			: Qt::Vertical;
+	};
+	switch (phase) {
+	case Qt::NoScrollPhase:
+		reset();
+		return std::nullopt;
+	case Qt::ScrollBegin:
+		reset();
+		if (!delta.isNull()) {
+			_locked = axis();
+		}
+		return _locked;
+	case Qt::ScrollEnd:
+		return base::take(_locked);
+	default:
+		if (!_locked && !delta.isNull()) {
+			_locked = axis();
+		}
+		return _locked;
+	}
+}
+
+void ScrollDirectionLock::reset() {
+	_locked = std::nullopt;
 }
 
 QColor BlendColors(QColor color1, QColor color2, float64 ratio) {
