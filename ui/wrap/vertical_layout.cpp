@@ -217,6 +217,9 @@ void VerticalLayout::childWidthUpdated(RpWidget *child) {
 	const auto it = ranges::find_if(_rows, [child](const Row &row) {
 		return (row.widget == child);
 	});
+	if (it == _rows.end()) {
+		return;
+	}
 	const auto &row = *it;
 	const auto margins = getMargins();
 	const auto top = child->y()
@@ -230,6 +233,9 @@ void VerticalLayout::childHeightUpdated(RpWidget *child) {
 	auto it = ranges::find_if(_rows, [child](const Row &row) {
 		return (row.widget == child);
 	});
+	if (it == _rows.end()) {
+		return;
+	}
 
 	const auto width = this->width();
 	const auto margins = getMargins();
@@ -256,7 +262,9 @@ void VerticalLayout::removeChild(RpWidget *child) {
 		return (row.widget == child);
 	});
 	auto end = _rows.end();
-	Assert(it != end);
+	if (it == end) {
+		return;
+	}
 
 	const auto width = this->width();
 	const auto margins = getMargins();
@@ -282,9 +290,18 @@ void VerticalLayout::removeChild(RpWidget *child) {
 }
 
 void VerticalLayout::clear() {
-	while (!_rows.empty()) {
-		removeChild(_rows.front().widget.data());
+	for (auto &row : base::take(_rows)) {
+		delete row.widget.data();
 	}
+	resize(width(), 0);
+}
+
+void VerticalLayout::detachRows() {
+	for (auto &row : base::take(_rows)) {
+		const auto widget = row.widget.release();
+		widget->hide();
+	}
+	resize(width(), 0);
 }
 
 } // namespace Ui
