@@ -211,6 +211,19 @@ public:
 	// the same way an edge with OverscrollType::None does.
 	void setOverscrollEdges(Fn<bool()> allowTop, Fn<bool()> allowBottom);
 
+	// Marks a Real edge as hosting a pull-to-action control (like the
+	// pull to the next channel in the chat history) reachable within
+	// the given distance of visual stretch, 0 - a plain bounce edge.
+	// Pull edges stretch with a much softer linear stiffness while the
+	// stretch is within that distance and without the minimum-delta
+	// threshold, so the affordance follows the finger closely from the
+	// first pixel; past the distance the stiff bounce mapping takes
+	// over, in both directions - an edge resting at an expanded
+	// overscroll default collapses through the soft range again.
+	// Virtual edges are pull edges implicitly, 0 meaning an uncapped
+	// soft range for them.
+	void setOverscrollPullDistances(int from, int till);
+
 	// Called synchronously when a user scroll gesture (wheel, trackpad,
 	// touch or Down/PageDown key) pushes past the bottom edge, before
 	// any overscroll accumulates. The callback may synchronously append
@@ -252,7 +265,8 @@ private:
 		Qt::ScrollPhase phase,
 		int delta,
 		bool ignore = false,
-		bool touch = false);
+		bool touch = false,
+		crl::time timestamp = 0);
 	bool requestBottomContent(int delta);
 	void handleTouchEvent(QTouchEvent *e);
 
@@ -282,11 +296,29 @@ private:
 	[[nodiscard]] AccumulatedParts computeAccumulatedParts() const;
 	[[nodiscard]] int currentOverscrollDefault() const;
 	[[nodiscard]] int currentOverscrollDefaultAccumulated() const;
+	[[nodiscard]] int overscrollFromAccumulated(
+		int side,
+		int accumulated) const;
+	[[nodiscard]] int overscrollToAccumulated(int side, int overscroll) const;
 	void overscrollReturn();
 	void overscrollReturnCancel();
 	void overscrollCheckReturnFinish();
 	bool overscrollFinish();
 	void applyAccumulatedScroll();
+
+	[[nodiscard]] bool overscrollSpringSide(int side) const;
+	[[nodiscard]] bool overscrollPullSide(int side) const;
+	[[nodiscard]] float64 overscrollPullDistance(int side) const;
+	[[nodiscard]] bool overscrollCollapsing() const;
+	void trackWheelVelocity(
+		Qt::ScrollPhase phase,
+		int delta,
+		crl::time timestamp);
+	void overscrollSpringStart(int side);
+	void overscrollBounce(int side, float64 velocity);
+	void overscrollSpringUpdate();
+	void updateBarState();
+	void overscrollSpringFinish();
 
 	const style::ScrollArea &_st;
 	std::unique_ptr<ElasticScrollBar> _bar;
@@ -335,6 +367,8 @@ private:
 	int _overscrollDefaultTill = 0;
 	OverscrollType _overscrollTypeFrom = OverscrollType::Real;
 	OverscrollType _overscrollTypeTill = OverscrollType::Real;
+	int _overscrollPullFrom = 0;
+	int _overscrollPullTill = 0;
 	Fn<bool()> _overscrollAllowFrom;
 	Fn<bool()> _overscrollAllowTill;
 	Fn<bool()> _bottomContentRequest;
@@ -342,6 +376,17 @@ private:
 	Ui::Animations::Simple _overscrollReturnAnimation;
 	rpl::variable<Position> _position;
 	rpl::variable<Movement> _movement;
+
+	float64 _wheelVelocity = 0.;
+	crl::time _wheelVelocityTime = 0;
+	crl::time _lastWheelEventTime = 0;
+	bool _lastWheelPhaseMomentum = false;
+	int _pendingOverscrollDelta = 0;
+	int _springSide = 0;
+	int _springTarget = 0;
+	float64 _springX0 = 0.;
+	float64 _springV0 = 0.;
+	float64 _springPeakTime = 0.;
 
 	object_ptr<QWidget> _widget = { nullptr };
 
@@ -351,8 +396,5 @@ private:
 	rpl::event_stream<> _geometryChanged;
 
 };
-
-[[nodiscard]] int OverscrollFromAccumulated(int accumulated);
-[[nodiscard]] int OverscrollToAccumulated(int overscroll);
 
 } // namespace Ui

@@ -1782,6 +1782,11 @@ bool MarkdownEnabledState::enabledForTag(QStringView tag) const {
 		&& (yes->tagsSubset.empty() || yes->tagsSubset.contains(tag));
 }
 
+bool MarkdownEnabledState::typedTagsEnabled() const {
+	const auto yes = std::get_if<MarkdownEnabled>(&data);
+	return yes && yes->typedTags;
+}
+
 InputField::InputField(
 	QWidget *parent,
 	const style::InputField &st,
@@ -2183,7 +2188,7 @@ void InputField::setMarkdownReplacesEnabled(
 	) | rpl::on_next([=](MarkdownEnabledState state) {
 		if (_markdownEnabledState != state) {
 			_markdownEnabledState = state;
-			if (_markdownEnabledState.disabled()) {
+			if (!_markdownEnabledState.typedTagsEnabled()) {
 				_lastMarkdownTags = {};
 			} else {
 				handleContentsChanged();
@@ -3871,7 +3876,9 @@ void InputField::handleContentsChanged() {
 		-1,
 		_lastTextWithTags.tags,
 		tagsChanged,
-		_markdownEnabledState.disabled() ? nullptr : &_lastMarkdownTags);
+		(_markdownEnabledState.typedTagsEnabled()
+			? &_lastMarkdownTags
+			: nullptr));
 
 	//highlightMarkdown();
 	if (_spoilerRangesText.empty() && _spoilerRangesEmoji.empty()) {
@@ -4091,7 +4098,8 @@ TextWithTags InputField::getTextWithTagsPart(int start, int end) const {
 }
 
 TextWithTags InputField::getTextWithAppliedMarkdown() const {
-	if (_markdownEnabledState.disabled() || _lastMarkdownTags.empty()) {
+	if (!_markdownEnabledState.typedTagsEnabled()
+		|| _lastMarkdownTags.empty()) {
 		return getTextWithTags();
 	}
 	const auto &originalText = _lastTextWithTags.text;
