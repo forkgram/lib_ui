@@ -57,6 +57,14 @@ extern const char kOptionQScroller[];
 // overscroll physics fed from the raw events.
 void SetupScrollerPhysics(not_null<QScroller*> scroller);
 
+// Resends the scroll-prepare event and, while a fling is in progress, forces
+// the momentum segment to be rebuilt from the current velocity. QScroller bakes
+// the whole trajectory (including edge clamps) at gesture end and
+// resendPrepareEvent() only shifts it, so without the rebuild a fling stops at
+// the old (shifted) edge; with it, the fling flows into content inserted
+// mid-fling. Null- and state-safe.
+void ResendScrollerPrepare(QScroller *scroller);
+
 class ScrollerStopper final : public QObject {
 public:
 	static ScrollerStopper &Instance();
@@ -223,7 +231,8 @@ public:
 	// Receives wheel input on the axis this scroll doesn't handle
 	// (horizontal): without lockWheelDirection() every event where that
 	// axis dominates, with it whole gestures locked to that axis.
-	void setCrossAxisWheelProcess(Fn<bool(QPoint)> process) {
+	void setCrossAxisWheelProcess(
+			Fn<bool(QPoint, Qt::ScrollPhase)> process) {
 		_crossAxisWheelProcess = std::move(process);
 	}
 
@@ -298,7 +307,7 @@ private:
 
 	Fn<bool(not_null<QWheelEvent*>)> _customWheelProcess;
 	Fn<bool(not_null<QTouchEvent*>)> _customTouchProcess;
-	Fn<bool(QPoint)> _crossAxisWheelProcess;
+	Fn<bool(QPoint, Qt::ScrollPhase)> _crossAxisWheelProcess;
 	ScrollDirectionLock _wheelDirectionLock;
 	bool _wheelDirectionLocked = false;
 	bool _widgetAcceptsTouch = false;
