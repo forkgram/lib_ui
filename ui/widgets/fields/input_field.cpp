@@ -1897,6 +1897,8 @@ InputField::InputField(
 
 	_inner->setContentsMargins(0, 0, 0, 0);
 	_inner->document()->setDocumentMargin(0);
+	updateRootFrameFormat();
+	_inner->document()->clearUndoRedoStacks();
 
 	base::qt_signal_producer(
 		_inner->document(),
@@ -3818,8 +3820,9 @@ void InputField::documentContentsChanged(
 void InputField::updateRootFrameFormat() {
 	const auto document = _inner->document();
 	auto format = document->rootFrame()->frameFormat();
-	const auto propertyId = QTextFrameFormat::FrameTopMargin;
-	const auto topMargin = format.property(propertyId).toInt();
+	auto changed = false;
+	const auto topPropertyId = QTextFrameFormat::FrameTopMargin;
+	const auto topMargin = format.property(topPropertyId).toInt();
 	const auto wantedTopMargin = StartsWithPre(document)
 		? (_st.style.pre.padding.top()
 			+ _st.style.pre.header
@@ -3829,7 +3832,23 @@ void InputField::updateRootFrameFormat() {
 		_requestedDocumentTopMargin = topMargin;
 	} else if (topMargin != wantedTopMargin) {
 		const auto value = QVariant::fromValue(1. * wantedTopMargin);
-		format.setProperty(propertyId, value);
+		format.setProperty(topPropertyId, value);
+		changed = true;
+	}
+
+	// Reserve room for the caret after the longest line, otherwise Qt
+	// clamps scroll and clips it (+1 covers whole-pixel rounding).
+	const auto rightPropertyId = QTextFrameFormat::FrameRightMargin;
+	const auto rightMargin = format.property(rightPropertyId).toInt();
+	const auto wantedRightMargin = std::max(
+		int(std::ceil(document->documentMargin())),
+		_inner->cursorWidth() + 1);
+	if (rightMargin != wantedRightMargin) {
+		const auto value = QVariant::fromValue(1. * wantedRightMargin);
+		format.setProperty(rightPropertyId, value);
+		changed = true;
+	}
+	if (changed) {
 		document->rootFrame()->setFrameFormat(format);
 	}
 }
@@ -4299,10 +4318,10 @@ void InputField::keyPressEventInner(QKeyEvent *e) {
 		if (alt || ctrl) {
 			e->ignore();
 		} else {
-			auto handled = false;
-			_tabbed.fire(&handled);
-			if (!handled
-				&& !focusNextPrevChild(key == Qt::Key_Tab && !shift)) {
+			const auto forward = (key == Qt::Key_Tab) && !shift;
+			auto request = TabbedRequest{ .backward = !forward };
+			_tabbed.fire(&request);
+			if (!request.handled && !focusNextPrevChild(forward)) {
 				e->ignore();
 			}
 		}
@@ -5991,7 +6010,8 @@ void InputField::insertFromMimeDataInner(const QMimeData *source) {
 		}
 		if (source->hasHtml() && !_markdownEnabledState.disabled()) {
 			if (auto parsed = TextUtilities::TextWithTagsFromHtml(
-					source->html())) {
+					source->html(),
+					_instantViewEditorTagsEnabled)) {
 				if (!HtmlTextMatchesPlainTextStart(
 						parsed->text,
 						source->text())) {
@@ -6110,7 +6130,8 @@ rpl::producer<bool> InputField::focusedChanges() const {
 	return _focusedChanges.events();
 }
 
-rpl::producer<not_null<bool*>> InputField::tabbed() const {
+auto InputField::tabbed() const
+-> rpl::producer<not_null<TabbedRequest*>> {
 	return _tabbed.events();
 }
 
