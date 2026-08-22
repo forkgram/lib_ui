@@ -199,9 +199,9 @@ struct Particle {
 }
 
 [[nodiscard]] std::optional<SpoilerMessCached> ReadDefaultMask(
+		const QString &folder,
 		const QString &name,
 		std::optional<SpoilerMessCached::Validator> validator) {
-	const auto folder = DefaultMaskCacheFolder();
 	if (folder.isEmpty()) {
 		return {};
 	}
@@ -212,15 +212,18 @@ struct Particle {
 }
 
 void WriteDefaultMask(
+		const QString &folder,
 		const QString &name,
 		const SpoilerMessCached &mask) {
-	const auto folder = DefaultMaskCacheFolder();
 	if (!QDir().mkpath(folder)) {
 		return;
 	}
 	const auto bytes = mask.serialize();
+	if (bytes.size() > kMaxCacheSize) {
+		return;
+	}
 	auto file = QFile(folder + '/' + name);
-	if (file.open(QIODevice::WriteOnly) && bytes.size() <= kMaxCacheSize) {
+	if (file.open(QIODevice::WriteOnly)) {
 		file.write(bytes);
 	}
 }
@@ -237,6 +240,44 @@ void Unregister(not_null<SpoilerAnimation*> animation) {
 	Expects(DefaultAnimationManager != nullptr);
 
 	DefaultAnimationManager->remove(animation);
+}
+
+struct DefaultSpoilerTasks {
+	std::mutex mutex;
+	std::condition_variable variable;
+	int running = 0;
+};
+
+[[nodiscard]] DefaultSpoilerTasks &DefaultSpoilerTasksData() {
+	static const auto result = new DefaultSpoilerTasks();
+	return *result;
+}
+
+void StartDefaultSpoilerTask() {
+	auto &tasks = DefaultSpoilerTasksData();
+	auto lock = std::unique_lock(tasks.mutex);
+	++tasks.running;
+}
+
+void FinishDefaultSpoilerTask() {
+	auto &tasks = DefaultSpoilerTasksData();
+	auto lock = std::unique_lock(tasks.mutex);
+	--tasks.running;
+	tasks.variable.notify_all();
+}
+
+// A generated mask reaches the cache only after the whole generation has
+// finished, so an exit taken in the middle of it throws the work away and
+// the next launch starts from scratch again. The owner passed to
+// PreloadTextSpoilerMask must therefore be one that dies while Qt's image
+// and file machinery is still alive, and this blocks there until every
+// posted task has finished reading, generating and writing its mask.
+void JoinDefaultSpoilerTasks() {
+	auto &tasks = DefaultSpoilerTasksData();
+	auto lock = std::unique_lock(tasks.mutex);
+	while (tasks.running > 0) {
+		tasks.variable.wait(lock);
+	}
 }
 
 // DescriptorFactory: (void) -> SpoilerMessDescriptor.
@@ -257,22 +298,30 @@ void PrepareDefaultSpoiler(
 		return;
 	}
 	const auto name = QString::fromUtf8(nameFactory);
+	const auto folder = DefaultMaskCacheFolder();
+	const auto descriptor = descriptorFactory();
+	StartDefaultSpoilerTask();
 	crl::async([=, &spoiler] {
-		const auto descriptor = descriptorFactory();
-		auto cached = ReadDefaultMask(name, SpoilerMessCached::Validator{
-			.frameDuration = descriptor.frameDuration,
-			.framesCount = descriptor.framesCount,
-			.canvasSize = descriptor.canvasSize,
-		});
+		const auto finish = gsl::finally(FinishDefaultSpoilerTask);
+		auto cached = ReadDefaultMask(
+			folder,
+			name,
+			SpoilerMessCached::Validator{
+				.frameDuration = descriptor.frameDuration,
+				.framesCount = descriptor.framesCount,
+				.canvasSize = descriptor.canvasSize,
+			});
 		spoiler.cached = postprocess(cached
 			? std::make_unique<SpoilerMessCached>(std::move(*cached))
 			: std::make_unique<SpoilerMessCached>(
 				GenerateSpoilerMess(descriptor))
 		).release();
-		auto lock = std::unique_lock(waiter->mutex);
-		waiter->variable.notify_all();
+		{
+			auto lock = std::unique_lock(waiter->mutex);
+			waiter->variable.notify_all();
+		}
 		if (!cached) {
-			WriteDefaultMask(name, *spoiler.cached);
+			WriteDefaultMask(folder, name, *spoiler.cached);
 		}
 	});
 }
@@ -292,6 +341,14 @@ void PrepareDefaultSpoiler(
 		}
 		waiter->variable.wait(lock);
 	}
+}
+
+void PrepareTextSpoilerMask() {
+	PrepareDefaultSpoiler(
+		DefaultTextMask,
+		"text",
+		DefaultDescriptorText,
+		[](std::unique_ptr<SpoilerMessCached> cached) { return cached; });
 }
 
 } // namespace
@@ -826,17 +883,14 @@ bool SpoilerAnimation::repaint(crl::time now) {
 	return true;
 }
 
-void PreloadTextSpoilerMask() {
-	PrepareDefaultSpoiler(
-		DefaultTextMask,
-		"text",
-		DefaultDescriptorText,
-		[](std::unique_ptr<SpoilerMessCached> cached) { return cached; });
+void PreloadTextSpoilerMask(rpl::lifetime &lifetime) {
+	lifetime.add(JoinDefaultSpoilerTasks);
+	PrepareTextSpoilerMask();
 }
 
 const SpoilerMessCached &DefaultTextSpoilerMask() {
 	[[maybe_unused]] static const auto once = [&] {
-		PreloadTextSpoilerMask();
+		PrepareTextSpoilerMask();
 		return 0;
 	}();
 	return WaitDefaultSpoiler(DefaultTextMask);

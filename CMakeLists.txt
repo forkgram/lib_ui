@@ -101,6 +101,8 @@ PRIVATE
     ui/rhi/rhi_surface.h
     ui/image/image_prepare.cpp
     ui/image/image_prepare.h
+    ui/image/svg_safety.cpp
+    ui/image/svg_safety.h
     ui/layers/box_content.cpp
     ui/layers/box_content.h
     ui/layers/box_layer_widget.cpp
@@ -211,8 +213,6 @@ PRIVATE
     ui/widgets/box_content_divider.h
     ui/widgets/buttons.cpp
     ui/widgets/buttons.h
-    ui/widgets/call_button.cpp
-    ui/widgets/call_button.h
     ui/widgets/checkbox.cpp
     ui/widgets/checkbox.h
     ui/widgets/dropdown_menu.cpp

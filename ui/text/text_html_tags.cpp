@@ -992,6 +992,22 @@ void AppendEscaped(QString &result, QStringView text, bool preserveNewlines) {
 		});
 }
 
+[[nodiscard]] bool HasClass(
+		const std::vector<HtmlAttribute> &attributes,
+		const QString &name) {
+	const auto value = AttributeValue(attributes, u"class"_q);
+	if (!value) {
+		return false;
+	}
+	const auto list = value->split(QChar(' '), Qt::SkipEmptyParts);
+	for (const auto &entry : list) {
+		if (entry == name) {
+			return true;
+		}
+	}
+	return false;
+}
+
 [[nodiscard]] QString NormalizedStyleValue(QStringView value) {
 	auto result = QString();
 	result.reserve(value.size());
@@ -1283,6 +1299,14 @@ enum class LineBreakKind {
 	Structural,
 };
 
+[[nodiscard]] QString BlockLineTagId(const ActiveTags &active) {
+	return (active.pre > 0)
+		? Ui::InputField::kTagPre
+		: (active.blockquote > 0)
+		? Ui::InputField::kTagBlockquote
+		: QString();
+}
+
 void AppendLine(ParseState &state, bool repeat, LineBreakKind kind) {
 	ClearPendingWhitespace(state);
 	if (!repeat
@@ -1290,15 +1314,41 @@ void AppendLine(ParseState &state, bool repeat, LineBreakKind kind) {
 			|| state.result.text.back() == '\n')) {
 		return;
 	}
+	const auto newline = QString(QChar('\n'));
 	if (kind == LineBreakKind::Visible) {
-		const auto newline = QString(QChar('\n'));
 		AppendTaggedText(
 			state,
 			newline,
 			ActiveTagId(state.active));
-	} else {
+		return;
+	}
+	const auto blockTagId = BlockLineTagId(state.active);
+	if (blockTagId.isEmpty()) {
 		state.result.text.append(QChar('\n'));
 		++state.trailingStructuralNewlines;
+		return;
+	}
+	// Untagged newline would end the quote and start another one.
+	const auto structural = state.trailingStructuralNewlines;
+	AppendTaggedText(state, newline, blockTagId);
+	state.trailingStructuralNewlines = structural + 1;
+}
+
+void DropTrailingBlockLineTag(ParseState &state, const QString &blockTagId) {
+	if (blockTagId.isEmpty()
+		|| state.tags.empty()
+		|| state.result.text.isEmpty()
+		|| state.result.text.back() != '\n') {
+		return;
+	}
+	auto &last = state.tags.back();
+	if (last.id != blockTagId
+		|| last.offset + last.length != int(state.result.text.size())) {
+		return;
+	}
+	--last.length;
+	if (!last.length) {
+		state.tags.pop_back();
 	}
 }
 
@@ -1772,6 +1822,11 @@ void CloseStyledElement(ParseState &state, const QString &name) {
 	state.styledElements.eraseFrom(index);
 }
 
+[[nodiscard]] bool IsInterchangeNewline(
+		const std::vector<HtmlAttribute> &attributes) {
+	return HasClass(attributes, u"Apple-interchange-newline"_q);
+}
+
 void ProcessTag(
 		ParseState &state,
 		const QString &name,
@@ -1794,7 +1849,11 @@ void ProcessTag(
 		return;
 	}
 	if (!closing && name == u"br"_q) {
-		AppendLine(state, true, LineBreakKind::Visible);
+		if (IsInterchangeNewline(attributes)) {
+			AppendLine(state, false, LineBreakKind::Structural);
+		} else {
+			AppendLine(state, true, LineBreakKind::Visible);
+		}
 		return;
 	}
 	if (name == u"a"_q && !selfClosing) {
@@ -1822,7 +1881,11 @@ void ProcessTag(
 	const auto inputTag = SupportedInputTag(name);
 	const auto styleInputTag = inputTag && IsStyleInputTag(*inputTag);
 	if (inputTag && !styleInputTag && !selfClosing) {
+		const auto wasBlockTagId = BlockLineTagId(state.active);
 		UpdateActive(state.active, *inputTag, closing);
+		if (closing && BlockLineTagId(state.active) != wasBlockTagId) {
+			DropTrailingBlockLineTag(state, wasBlockTagId);
+		}
 	}
 	if (!IsVoidElement(name)) {
 		if (closing) {
@@ -3005,22 +3068,6 @@ void ProcessListItemTag(
 	return (name == u"tg-collage"_q) || (name == u"tg-slideshow"_q);
 }
 
-[[nodiscard]] bool HasClass(
-		const std::vector<HtmlAttribute> &attributes,
-		const QString &name) {
-	const auto value = AttributeValue(attributes, u"class"_q);
-	if (!value) {
-		return false;
-	}
-	const auto list = value->split(QChar(' '), Qt::SkipEmptyParts);
-	for (const auto &entry : list) {
-		if (entry == name) {
-			return true;
-		}
-	}
-	return false;
-}
-
 [[nodiscard]] bool HasOpenMediaGroup(const BlockParseState &state) {
 	for (const auto &container : state.stack) {
 		if ((container.block.kind == HtmlBlockKind::Collage)
@@ -3107,7 +3154,10 @@ void AppendMediaBlock(
 		const std::vector<HtmlAttribute> &attributes) {
 	FlushLeafBlock(state);
 	const auto source = AttributeValue(attributes, u"src"_q);
-	if (!source || source->trimmed().isEmpty()) {
+	const auto identity = AttributeValue(attributes, u"data-tg-src"_q);
+	const auto trimmedSource = source ? source->trimmed() : QString();
+	const auto trimmedIdentity = identity ? identity->trimmed() : QString();
+	if (trimmedSource.isEmpty() && trimmedIdentity.isEmpty()) {
 		return;
 	} else if (!EmitBlockAllowed(state)) {
 		return;
@@ -3116,10 +3166,8 @@ void AppendMediaBlock(
 	auto block = HtmlBlock();
 	block.kind = kind;
 	block.anchorId = AnchorIdFromAttributes(attributes);
-	block.media.source = source->trimmed();
-	if (const auto identity = AttributeValue(attributes, u"data-tg-src"_q)) {
-		block.media.identity = identity->trimmed();
-	}
+	block.media.source = trimmedSource;
+	block.media.identity = trimmedIdentity;
 	block.media.width = AttributeInt(attributes, u"width"_q).value_or(0);
 	block.media.height = AttributeInt(attributes, u"height"_q).value_or(0);
 	block.media.spoiler = HasAttribute(attributes, u"tg-spoiler"_q);

@@ -6,6 +6,7 @@
 //
 #include "ui/widgets/tooltip.h"
 
+#include "ui/integration.h"
 #include "ui/ui_utility.h"
 #include "ui/painter.h"
 #include "ui/platform/ui_platform_utility.h"
@@ -86,7 +87,7 @@ void Tooltip::popup(const QPoint &m, const QString &text, const style::Tooltip *
 
 	_point = m;
 	_st = st;
-	_text = Text::String(_st->textStyle, text, kPlainTextOptions, _st->widthMax);
+	_text = Text::String(_st->textStyle, text, kPlainTextOptions, 1);
 	accessibilityNameChanged();
 
 	_useTransparency = Platform::TranslucentWindowsSupported();
@@ -527,6 +528,7 @@ object_ptr<RpWidget> MakeTooltipWithClose(
 	const auto button = CreateChild<IconButton>(
 		result.data(),
 		closeSt);
+	button->setAccessibleName(Integration::Instance().phraseButtonClose());
 	result->sizeValue(
 	) | rpl::on_next([=](QSize size) {
 		button->resize(button->width(), size.height());
