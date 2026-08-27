@@ -129,10 +129,13 @@ void SurfaceRhi::installExStyleFilterWin() {
 	}
 	const auto tlw = window();
 	if (!tlw || !tlw->testAttribute(Qt::WA_TranslucentBackground)) {
+		LOG(("QRhi: Not translucent, no ex-style filter."));
 		return;
 	}
 	const auto handle = tlw->windowHandle();
 	if (!handle || handle->surfaceType() != QSurface::Direct3DSurface) {
+		LOG(("QRhi: Surface type %1, no ex-style filter."
+			).arg(handle ? int(handle->surfaceType()) : -1));
 		return;
 	}
 	const auto hwnd = reinterpret_cast<HWND>(handle->winId());
@@ -147,6 +150,8 @@ void SurfaceRhi::installExStyleFilterWin() {
 	_exStyleFilterHwnd = hwnd;
 	// Qt may have set the bit before the subclass was attached.
 	const auto exStyle = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+	LOG(("QRhi: Ex-style filter installed, WS_EX_LAYERED was %1."
+		).arg((exStyle & WS_EX_LAYERED) ? u"set"_q : u"clear"_q));
 	if (exStyle & WS_EX_LAYERED) {
 		::SetWindowLongPtrW(
 			hwnd,
