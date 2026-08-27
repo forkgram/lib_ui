@@ -36,7 +36,12 @@ Menu::Menu(QWidget *parent, QMenu *menu, const style::Menu &st)
 	_wappedMenu->hide();
 }
 
-Menu::~Menu() = default;
+Menu::~Menu() {
+	// Detach before destroying: ~QWidget of a visible item re-enters us
+	// synchronously through sendSyntheticEnterLeave(), and MSVC's vector
+	// keeps its old size() while _Destroy_range nulls the entries.
+	base::take(_actionWidgets);
+}
 
 void Menu::init() {
 	resize(_forceWidth ? _forceWidth : _st.widthMin, _st.skip * 2);
@@ -201,7 +206,17 @@ int Menu::recountHeight() const {
 void Menu::removeAction(int position) {
 	Expects(position >= 0 && position < actions().size());
 
+	// Detached, not erased in place: erasing runs the widget's destructor
+	// while the vector is still shifting its tail down, so a re-entrant pass
+	// (destroying an item fires its selection stream) would walk a
+	// stale-size vector with moved-from entries in it.
+	auto widget = base::take(_actionWidgets[position]);
 	_actionWidgets.erase(begin(_actionWidgets) + position);
+
+	// The widget goes first, like in clearActions() and clearLastSeparator():
+	// an item reads action() while it is being torn down, so the action has
+	// to outlive it.
+	widget = nullptr;
 	if (_actions[position]->parent() == this) {
 		delete _actions[position];
 	}
@@ -221,7 +236,8 @@ not_null<QAction*> Menu::addSeparator(const style::MenuSeparator *st) {
 }
 
 void Menu::clearActions() {
-	_actionWidgets.clear();
+	// Detached, not cleared: destroying an item widget can re-enter us.
+	base::take(_actionWidgets);
 	for (auto action : base::take(_actions)) {
 		if (action->parent() == this) {
 			delete action;
@@ -239,7 +255,12 @@ void Menu::clearLastSeparator() {
 			resizeFromInner(
 				width(),
 				height() - _actionWidgets.back()->height());
+			// Detached, not popped in place: pop_back() runs the widget's
+			// destructor while the vector still reports the old size, so a
+			// re-entrant pass would walk a destroyed entry.
+			auto widget = base::take(_actionWidgets.back());
 			_actionWidgets.pop_back();
+			widget = nullptr;
 			if (_actions.back()->parent() == this) {
 				delete _actions.back();
 				_actions.pop_back();
