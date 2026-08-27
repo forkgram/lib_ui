@@ -353,7 +353,13 @@ RpWidget::RpWidget(QWidget *parent)
 : RpWidgetBase<QWidget>(parent) {
 	[[maybe_unused]] static const auto Once = [] {
 		auto format = QSurfaceFormat::defaultFormat();
+		// A zero swap interval makes the backing store ask for NoVSync, which
+		// adds DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING and upsets driver overlays.
+#ifdef Q_OS_WIN
+		format.setSwapInterval(1);
+#else // Q_OS_WIN
 		format.setSwapInterval(::Platform::MetalSupported() ? 1 : 0);
+#endif // !Q_OS_WIN
 #ifdef DESKTOP_APP_USE_ANGLE
 		format.setRedBufferSize(8);
 		format.setGreenBufferSize(8);
