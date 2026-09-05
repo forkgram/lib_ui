@@ -123,6 +123,8 @@ PRIVATE
     ui/paint/blobs.h
     ui/paint/blobs_linear.cpp
     ui/paint/blobs_linear.h
+    ui/platform/linux/ui_font_settings_linux.cpp
+    ui/platform/linux/ui_font_settings_linux.h
     ui/platform/linux/ui_window_linux.cpp
     ui/platform/linux/ui_window_linux.h
     ui/platform/linux/ui_window_title_linux.cpp
@@ -194,6 +196,9 @@ PRIVATE
     ui/text/text_isolated_emoji.h
     ui/text/text_renderer.cpp
     ui/text/text_renderer.h
+    ui/text/text_shaper.h
+    ui/text/text_shaper_pango.cpp
+    ui/text/text_shaper_qt.cpp
     ui/text/text_stack_engine.cpp
     ui/text/text_stack_engine.h
     ui/text/text_utilities.cpp
@@ -255,6 +260,8 @@ PRIVATE
     ui/widgets/menu/menu_toggle.h
     ui/widgets/elastic_scroll.cpp
     ui/widgets/elastic_scroll.h
+    ui/widgets/kinetic_scroller.cpp
+    ui/widgets/kinetic_scroller.h
     ui/widgets/pill_tabs.cpp
     ui/widgets/pill_tabs.h
     ui/widgets/popup_menu.cpp
@@ -326,7 +333,10 @@ PRIVATE
     ui/screen_reader_mode.cpp
     ui/screen_reader_mode.h
     ui/ui_rpl_filter.h
+    ui/ui_touch_forward.cpp
+    ui/ui_touch_forward.h
     ui/ui_utility.cpp
+    ui/ui_fixed.h
     ui/ui_utility.h
 
     ui/ui_pch.h
@@ -336,9 +346,32 @@ PRIVATE
     emoji_suggestions/emoji_suggestions_helper.h
 )
 
+if (QT_VERSION_MAJOR LESS 6)
+    remove_target_sources(lib_ui ${src_loc}
+        ui/widgets/kinetic_scroller.cpp
+    )
+endif()
+
 if (DESKTOP_APP_USE_PACKAGED_FONTS)
     target_compile_definitions(lib_ui PRIVATE LIB_UI_USE_PACKAGED_FONTS)
     remove_target_sources(lib_ui ${src_loc} fonts/fonts.qrc)
+endif()
+
+if (DESKTOP_APP_USE_PANGO)
+    remove_target_sources(lib_ui ${src_loc}
+        ui/text/text_bidi_algorithm.h
+        ui/text/text_shaper_qt.cpp
+        ui/text/text_stack_engine.cpp
+        ui/text/text_stack_engine.h
+    )
+    target_compile_definitions(lib_ui PRIVATE LIB_UI_USE_PANGO)
+    target_link_libraries(lib_ui PRIVATE desktop-app::external_pango)
+else()
+    remove_target_sources(lib_ui ${src_loc}
+        ui/platform/linux/ui_font_settings_linux.cpp
+        ui/platform/linux/ui_font_settings_linux.h
+        ui/text/text_shaper_pango.cpp
+    )
 endif()
 
 target_include_directories(lib_ui

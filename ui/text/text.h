@@ -6,6 +6,8 @@
 //
 #pragma once
 
+#include "ui/ui_fixed.h"
+
 #include "ui/text/text_entity.h"
 #include "ui/click_handler.h"
 #include "base/flags.h"
@@ -459,8 +461,8 @@ private:
 	};
 
 	struct LineMetrics {
-		QFixed ascent = 0;
-		QFixed descent = 0;
+		Fixed ascent = 0;
+		Fixed descent = 0;
 
 		[[nodiscard]] int height() const {
 			return (ascent + descent).toInt();
@@ -486,7 +488,7 @@ private:
 	[[nodiscard]] QMargins quotePadding(QuoteDetails *quote) const;
 	[[nodiscard]] int quoteMinWidth(QuoteDetails *quote) const;
 	[[nodiscard]] const QString &quoteHeaderText(QuoteDetails *quote) const;
-	[[nodiscard]] QFixed blockBaselineShift(const AbstractBlock *block) const;
+	[[nodiscard]] Fixed blockBaselineShift(const AbstractBlock *block) const;
 	[[nodiscard]] LineMetrics defaultLineMetrics() const;
 	[[nodiscard]] LineMetrics resolveLineMetrics(
 		int lineStart,
@@ -542,6 +544,10 @@ private:
 	const style::TextStyle *_st = nullptr;
 	QString _text;
 	std::vector<Block> _blocks;
+
+	// Bumped by everything that changes what is laid out, so that anything
+	// keeping a result of laying it out can tell that its own is stale.
+	uint _version = 0;
 	std::vector<Word> _words;
 	ExtendedWrap _extended;
 
@@ -564,11 +570,18 @@ private:
 	friend class Renderer;
 	friend class BidiAlgorithm;
 	friend class StackEngine;
+	friend class Paragraph;
+	friend class LineShaper;
 
 };
 
 [[nodiscard]] bool IsBad(QChar ch);
 [[nodiscard]] bool IsWordSeparator(QChar ch);
+[[nodiscard]] bool IsWordSeparator(const QString &text, int position);
+[[nodiscard]] bool IsWordSeparator(
+	Fn<QChar(int)> at,
+	int length,
+	int position);
 [[nodiscard]] bool IsAlmostLinkEnd(QChar ch);
 [[nodiscard]] bool IsLinkEnd(QChar ch);
 [[nodiscard]] bool IsNewline(QChar ch);
