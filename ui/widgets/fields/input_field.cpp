@@ -1643,6 +1643,7 @@ private:
 
 };
 
+#ifndef QT_SPELLCHECK_UNDERLINE_FROM_CHROME
 // The mark under a misspelled word, drawn the way Chrome draws it - a wave on
 // Windows and on Linux, a row of dots on macOS. Kept in the cache of pixmaps
 // as one period of it, so that a run of any length is a filled rectangle.
@@ -1669,8 +1670,10 @@ private:
 
 		const auto height = kMarkerHeight * factor;
 		const auto width = height + 1;
-		result = QPixmap(
-			(QSizeF(qCeil(width), qFloor(height)) * ratio).toSize());
+		const auto size = QSizeF(
+			int(std::ceil(width)),
+			int(std::floor(height)));
+		result = QPixmap((size * ratio).toSize());
 		result.setDevicePixelRatio(ratio);
 		result.fill(Qt::transparent);
 		{
@@ -1679,7 +1682,8 @@ private:
 			p.setBrush(color);
 			p.setRenderHints(
 				QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
-			p.drawEllipse(0, 0, qFloor(height), qFloor(height));
+			const auto side = int(std::floor(height));
+			p.drawEllipse(0, 0, side, side);
 		}
 		return result;
 	}
@@ -1722,6 +1726,7 @@ private:
 
 	return result;
 }
+#endif // !QT_SPELLCHECK_UNDERLINE_FROM_CHROME
 
 void InsertEmojiAtCursor(QTextCursor cursor, EmojiPtr emoji) {
 	const auto currentFormat = cursor.charFormat();
@@ -1913,7 +1918,7 @@ InputField::InputField(
 
 		if (_mode != Mode::SingleLine) {
 			const auto metrics = QFontMetricsF(_st.style.font->f);
-			const auto leading = qMax(metrics.leading(), qreal(0.0));
+			const auto leading = std::max(metrics.leading(), qreal(0.0));
 			const auto adjustment = (metrics.ascent() + leading)
 				- ((_st.style.font->height * 4) / 5);
 			_placeholderCustomFontSkip = int(base::SafeRound(-adjustment));
@@ -2326,9 +2331,12 @@ void InputField::paintEventInner(QPaintEvent *e) {
 	_customEmojiRepaintScheduled = false;
 	paintQuotes(e);
 	_inner->QTextEdit::paintEvent(e);
+#ifndef QT_SPELLCHECK_UNDERLINE_FROM_CHROME
 	paintMisspelled(e);
+#endif // !QT_SPELLCHECK_UNDERLINE_FROM_CHROME
 }
 
+#ifndef QT_SPELLCHECK_UNDERLINE_FROM_CHROME
 void InputField::paintMisspelled(QPaintEvent *e) {
 	const auto clip = e->rect();
 	const auto ratio = _inner->viewport()->devicePixelRatioF();
@@ -2415,6 +2423,7 @@ void InputField::paintMisspelled(QPaintEvent *e) {
 		}
 	}
 }
+#endif // !QT_SPELLCHECK_UNDERLINE_FROM_CHROME
 
 void InputField::paintQuotes(QPaintEvent *e) {
 	if (!_blockquoteCache || !_preCache) {
@@ -2889,8 +2898,12 @@ void InputField::paintFlatSurrounding(
 	const auto borderOpacity = _a_borderOpacity.value(_borderVisible ? 1. : 0.);
 	if (_st.borderActive && (borderOpacity > 0.)) {
 		auto borderStart = std::clamp(_borderAnimationStart, 0, width());
-		auto borderFrom = qRound(borderStart * (1. - borderShownDegree));
-		auto borderTo = borderStart + qRound((width() - borderStart) * borderShownDegree);
+		auto borderFrom
+			= int(base::SafeRound(borderStart * (1. - borderShownDegree)));
+		const auto borderRest = width() - borderStart;
+		const auto shownTo
+			= int(base::SafeRound(borderRest * borderShownDegree));
+		auto borderTo = borderStart + shownTo;
 		if (borderTo > borderFrom) {
 			auto borderFg = anim::brush(_st.borderFgActive, _st.borderFgError, errorDegree);
 			p.setOpacity(borderOpacity);
@@ -3686,7 +3699,7 @@ void InputField::processFormatting(int insertPosition, int insertEnd) {
 					}
 				}
 
-				auto *ch = textStart + qMax(changedPositionInFragment, 0);
+				auto *ch = textStart + std::max(changedPositionInFragment, 0);
 				for (; ch < textEnd; ++ch) {
 					const auto removeNewline = (_mode != Mode::MultiLine)
 						&& IsNewline(*ch);

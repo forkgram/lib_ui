@@ -345,21 +345,26 @@ void WindowHelper::Private::initCustomTitle() {
 	const auto guard = base::make_weak(_owner->window());
 	const auto savedWindow = _nativeWindow;
 	const auto poll = std::make_shared<Fn<void(int)>>();
-	*poll = [this, guard, savedWindow, poll](int attempts) {
+	const auto repeat = [weak = std::weak_ptr(poll)](int attempts) {
+		const auto strong = weak.lock();
+		if (!strong) {
+			return;
+		}
+		dispatch_async(dispatch_get_main_queue(), ^{
+			(*strong)(attempts);
+		});
+	};
+	*poll = [this, guard, savedWindow, repeat](int attempts) {
 		if (!guard || attempts <= 0) return;
 		const auto wid = _owner->window()->winId();
 		if (!wid) {
-			dispatch_async(dispatch_get_main_queue(), ^{
-				(*poll)(attempts - 1);
-			});
+			repeat(attempts - 1);
 			return;
 		}
 		const auto freshView = reinterpret_cast<NSView*>(wid);
 		const auto freshWindow = freshView ? [freshView window] : nil;
 		if (!freshWindow) {
-			dispatch_async(dispatch_get_main_queue(), ^{
-				(*poll)(attempts - 1);
-			});
+			repeat(attempts - 1);
 			return;
 		}
 		if (freshWindow != savedWindow) {
@@ -377,7 +382,9 @@ void WindowHelper::Private::initCustomTitle() {
 
 	auto inner = [_nativeWindow contentLayoutRect];
 	auto full = [_nativeView frame];
-	_customTitleHeight = qMax(qRound(full.size.height - inner.size.height), 0);
+	_customTitleHeight = std::max(
+		int(base::SafeRound(full.size.height - inner.size.height)),
+		0);
 
 	// Qt still has some bug with layer-backed widgets containing QOpenGLWidgets.
 	// See https://github.com/telegramdesktop/tdesktop/issues/4150
