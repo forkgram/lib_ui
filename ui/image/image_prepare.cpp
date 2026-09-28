@@ -7,6 +7,7 @@
 #include "ui/image/image_prepare.h"
 
 #include "ui/effects/animation_value.h"
+#include "ui/image/image_blur_simd.h"
 #include "ui/image/svg_safety.h"
 #include "ui/style/style_core.h"
 #include "ui/painter.h"
@@ -680,6 +681,111 @@ yi += stride;
 	return std::move(image);
 }
 
+namespace StackBlur {
+
+template <int Lanes, bool Contiguous>
+TG_FORCE_INLINE void LoadLanes(const uchar *from, int laneStep, Quad *quads) {
+	if constexpr (Contiguous) {
+		Load4(from, quads);
+	} else {
+		for (auto lane = 0; lane != Lanes; ++lane) {
+			quads[lane] = Load(from + lane * laneStep);
+		}
+	}
+}
+
+template <int Lanes, bool Contiguous, bool KeepAlpha>
+TG_FORCE_INLINE void StoreLanes(uchar *to, int laneStep, const Quad *quads) {
+	if constexpr (Contiguous && KeepAlpha) {
+		Store4KeepAlpha(to, quads);
+	} else {
+		for (auto lane = 0; lane != Lanes; ++lane) {
+			const auto packed = Pack(quads[lane]);
+			const auto at = to + lane * laneStep;
+			if constexpr (KeepAlpha) {
+				at[0] = uchar(packed);
+				at[1] = uchar(packed >> 8);
+				at[2] = uchar(packed >> 16);
+			} else {
+				memcpy(at, &packed, 4);
+			}
+		}
+	}
+}
+
+// One separable pass along count positions step bytes apart.
+template <int Lanes, bool Contiguous, bool KeepAlpha>
+void Pass(
+		const uchar *source,
+		uchar *destination,
+		int count,
+		int step,
+		int laneStep,
+		int radius,
+		Divider divider,
+		Quad *stack,
+		const int *ahead) {
+	const auto div = 2 * radius + 1;
+	const auto radius_p1 = radius + 1;
+	const auto last = count - 1;
+
+	Quad insum[Lanes], outsum[Lanes], sum[Lanes], pixel[Lanes];
+	for (auto lane = 0; lane != Lanes; ++lane) {
+		insum[lane] = outsum[lane] = sum[lane] = Zero();
+	}
+	for (auto i = -radius; i != radius_p1; ++i) {
+		const auto slot = stack + (i + radius) * Lanes;
+		LoadLanes<Lanes, Contiguous>(
+			source + std::clamp(i, 0, last) * step,
+			laneStep,
+			slot);
+		const auto weight = radius_p1 - std::abs(i);
+		for (auto lane = 0; lane != Lanes; ++lane) {
+			sum[lane] = Add(sum[lane], Scale(slot[lane], weight));
+			if (i > 0) {
+				insum[lane] = Add(insum[lane], slot[lane]);
+			} else {
+				outsum[lane] = Add(outsum[lane], slot[lane]);
+			}
+		}
+	}
+
+	auto stackpointer = radius;
+	auto stackstart = 0;
+	for (auto i = 0; i != count; ++i) {
+		Quad result[Lanes];
+		for (auto lane = 0; lane != Lanes; ++lane) {
+			result[lane] = Divide(sum[lane], divider);
+		}
+		StoreLanes<Lanes, Contiguous, KeepAlpha>(
+			destination + i * step,
+			laneStep,
+			result);
+
+		const auto out = stack + stackstart * Lanes;
+		if (++stackstart == div) {
+			stackstart = 0;
+		}
+		LoadLanes<Lanes, Contiguous>(source + ahead[i], laneStep, pixel);
+		if (++stackpointer == div) {
+			stackpointer = 0;
+		}
+		const auto in = stack + stackpointer * Lanes;
+
+		for (auto lane = 0; lane != Lanes; ++lane) {
+			sum[lane] = Sub(sum[lane], outsum[lane]);
+			outsum[lane] = Sub(outsum[lane], out[lane]);
+			out[lane] = pixel[lane];
+			insum[lane] = Add(insum[lane], pixel[lane]);
+			sum[lane] = Add(sum[lane], insum[lane]);
+			outsum[lane] = Add(outsum[lane], in[lane]);
+			insum[lane] = Sub(insum[lane], in[lane]);
+		}
+	}
+}
+
+} // namespace StackBlur
+
 [[nodiscard]] QImage BlurLargeImage(QImage &&image, int radius) {
 	const auto width = image.width();
 	const auto height = image.height();
@@ -693,205 +799,78 @@ yi += stride;
 			QImage::Format_ARGB32_Premultiplied);
 	}
 	const auto pixels = image.bits();
+	const auto stride = width * 4;
+	const auto divider = StackBlur::MakeDivider(radius);
+	constexpr auto kLanes = StackBlur::kLanes;
 
-	const auto width_m1 = width - 1;
-	const auto height_m1 = height - 1;
-	const auto widthxheight = width * height;
-	const auto div = 2 * radius + 1;
-	const auto radius_p1 = radius + 1;
-	const auto divsum = radius_p1 * radius_p1;
+	auto storage = std::vector<StackBlur::QuadStorage>(
+		size_t(2 * radius + 1) * kLanes);
+	const auto stack = reinterpret_cast<StackBlur::Quad*>(storage.data());
+	auto ahead = std::vector<int>(std::max(width, height));
+	auto middle = std::make_unique_for_overwrite<uchar[]>(
+		size_t(width) * height * 4);
+	const auto blurred = middle.get();
 
-	const auto dvcount = 256 * divsum;
-	const auto buffers = (div * 3) // stack
-		+ std::max(width, height) // vmin
-		+ widthxheight * 3 // rgb
-		+ dvcount; // dv
-	auto storage = std::vector<int>(buffers);
-	auto taken = 0;
-	const auto take = [&](int size) {
-		const auto result = gsl::make_span(storage).subspan(taken, size);
-		taken += size;
-		return result;
-	};
-
-	// Small buffers
-	const auto stack = take(div * 3).data();
-	const auto vmin = take(std::max(width, height)).data();
-
-	// Large buffers
-	const auto rgb = take(widthxheight * 3).data();
-	const auto dvs = take(dvcount);
-
-	auto &&ints = ranges::views::ints;
-	for (auto &&[value, index] : ranges::views::zip(dvs, ints(0, ranges::unreachable))) {
-		value = (index / divsum);
+	// Horizontally: lanes are rows, positions run along a row.
+	for (auto x = 0; x != width; ++x) {
+		ahead[x] = std::min(x + radius + 1, width - 1) * 4;
 	}
-	const auto dv = dvs.data();
-
-	// Variables
-	auto stackpointer = 0;
-	for (const auto x : ints(0, width)) {
-		vmin[x] = std::min(x + radius_p1, width_m1);
+	auto y = 0;
+	for (; y + kLanes <= height; y += kLanes) {
+		StackBlur::Pass<kLanes, false, false>(
+			pixels + y * stride,
+			blurred + y * stride,
+			width,
+			4,
+			stride,
+			radius,
+			divider,
+			stack,
+			ahead.data());
 	}
-	for (const auto y : ints(0, height)) {
-		auto rinsum = 0;
-		auto ginsum = 0;
-		auto binsum = 0;
-		auto routsum = 0;
-		auto goutsum = 0;
-		auto boutsum = 0;
-		auto rsum = 0;
-		auto gsum = 0;
-		auto bsum = 0;
-
-		const auto y_width = y * width;
-		for (const auto i : ints(-radius, radius + 1)) {
-			const auto sir = &stack[(i + radius) * 3];
-			const auto x = std::clamp(i, 0, width_m1);
-			const auto offset = (y_width + x) * 4;
-			sir[0] = pixels[offset];
-			sir[1] = pixels[offset + 1];
-			sir[2] = pixels[offset + 2];
-
-			const auto rbs = radius_p1 - std::abs(i);
-			rsum += sir[0] * rbs;
-			gsum += sir[1] * rbs;
-			bsum += sir[2] * rbs;
-
-			if (i > 0) {
-				rinsum += sir[0];
-				ginsum += sir[1];
-				binsum += sir[2];
-			} else {
-				routsum += sir[0];
-				goutsum += sir[1];
-				boutsum += sir[2];
-			}
-		}
-		stackpointer = radius;
-
-		for (const auto x : ints(0, width)) {
-			const auto position = (y_width + x) * 3;
-			rgb[position] = dv[rsum];
-			rgb[position + 1] = dv[gsum];
-			rgb[position + 2] = dv[bsum];
-
-			rsum -= routsum;
-			gsum -= goutsum;
-			bsum -= boutsum;
-
-			const auto stackstart = (stackpointer - radius + div) % div;
-			const auto sir = &stack[stackstart * 3];
-
-			routsum -= sir[0];
-			goutsum -= sir[1];
-			boutsum -= sir[2];
-
-			const auto offset = (y_width + vmin[x]) * 4;
-			sir[0] = pixels[offset];
-			sir[1] = pixels[offset + 1];
-			sir[2] = pixels[offset + 2];
-			rinsum += sir[0];
-			ginsum += sir[1];
-			binsum += sir[2];
-
-			rsum += rinsum;
-			gsum += ginsum;
-			bsum += binsum;
-			{
-				stackpointer = (stackpointer + 1) % div;
-				const auto sir = &stack[stackpointer * 3];
-
-				routsum += sir[0];
-				goutsum += sir[1];
-				boutsum += sir[2];
-
-				rinsum -= sir[0];
-				ginsum -= sir[1];
-				binsum -= sir[2];
-			}
-		}
+	for (; y != height; ++y) {
+		StackBlur::Pass<1, false, false>(
+			pixels + y * stride,
+			blurred + y * stride,
+			width,
+			4,
+			stride,
+			radius,
+			divider,
+			stack,
+			ahead.data());
 	}
 
-	for (const auto y : ints(0, height)) {
-		vmin[y] = std::min(y + radius_p1, height_m1) * width;
+	// Vertically: lanes are neighbouring columns, so they load and store whole.
+	for (auto y = 0; y != height; ++y) {
+		ahead[y] = std::min(y + radius + 1, height - 1) * stride;
 	}
-	for (const auto x : ints(0, width)) {
-		auto rinsum = 0;
-		auto ginsum = 0;
-		auto binsum = 0;
-		auto routsum = 0;
-		auto goutsum = 0;
-		auto boutsum = 0;
-		auto rsum = 0;
-		auto gsum = 0;
-		auto bsum = 0;
-		for (const auto i : ints(-radius, radius + 1)) {
-			const auto y = std::clamp(i, 0, height_m1);
-			const auto position = (y * width + x) * 3;
-			const auto sir = &stack[(i + radius) * 3];
-
-			sir[0] = rgb[position];
-			sir[1] = rgb[position + 1];
-			sir[2] = rgb[position + 2];
-
-			const auto rbs = radius_p1 - std::abs(i);
-			rsum += sir[0] * rbs;
-			gsum += sir[1] * rbs;
-			bsum += sir[2] * rbs;
-			if (i > 0) {
-				rinsum += sir[0];
-				ginsum += sir[1];
-				binsum += sir[2];
-			} else {
-				routsum += sir[0];
-				goutsum += sir[1];
-				boutsum += sir[2];
-			}
-		}
-		stackpointer = radius;
-		for (const auto y : ints(0, height)) {
-			const auto offset = (y * width + x) * 4;
-			pixels[offset] = dv[rsum];
-			pixels[offset + 1] = dv[gsum];
-			pixels[offset + 2] = dv[bsum];
-			rsum -= routsum;
-			gsum -= goutsum;
-			bsum -= boutsum;
-
-			const auto stackstart = (stackpointer - radius + div) % div;
-			const auto sir = &stack[stackstart * 3];
-
-			routsum -= sir[0];
-			goutsum -= sir[1];
-			boutsum -= sir[2];
-
-			const auto position = (vmin[y] + x) * 3;
-			sir[0] = rgb[position];
-			sir[1] = rgb[position + 1];
-			sir[2] = rgb[position + 2];
-
-			rinsum += sir[0];
-			ginsum += sir[1];
-			binsum += sir[2];
-
-			rsum += rinsum;
-			gsum += ginsum;
-			bsum += binsum;
-			{
-				stackpointer = (stackpointer + 1) % div;
-				const auto sir = &stack[stackpointer * 3];
-
-				routsum += sir[0];
-				goutsum += sir[1];
-				boutsum += sir[2];
-
-				rinsum -= sir[0];
-				ginsum -= sir[1];
-				binsum -= sir[2];
-			}
-		}
+	auto x = 0;
+	for (; x + kLanes <= width; x += kLanes) {
+		StackBlur::Pass<kLanes, true, true>(
+			blurred + x * 4,
+			pixels + x * 4,
+			height,
+			stride,
+			4,
+			radius,
+			divider,
+			stack,
+			ahead.data());
 	}
+	for (; x != width; ++x) {
+		StackBlur::Pass<1, false, true>(
+			blurred + x * 4,
+			pixels + x * 4,
+			height,
+			stride,
+			4,
+			radius,
+			divider,
+			stack,
+			ahead.data());
+	}
+
 	return std::move(image);
 }
 

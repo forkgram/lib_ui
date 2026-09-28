@@ -950,6 +950,7 @@ void WindowHelper::updateMargins() {
 	auto margins = nativeResize()
 		? QMargins(0, r.top, 0, 0)
 		: QMargins(r.left, r.top, -r.right, -r.bottom);
+	_rcWorkDelta = QMargins();
 	if (style & WS_MAXIMIZE) {
 		RECT w, m;
 		GetWindowRect(_handle , &w);
@@ -963,19 +964,21 @@ void WindowHelper::updateMargins() {
 			m = mi.rcWork;
 		}
 
-		_marginsDelta = QMargins(
+		_rcWorkDelta = QMargins(
 			w.left - m.left,
 			w.top - m.top,
 			m.right - w.right,
 			m.bottom - w.bottom);
 
+		_marginsDelta = _rcWorkDelta;
+
 		// With native borders Qt already measures maximized frame itself,
 		// shifting custom margins here made it 16px wider than client.
 		if (!nativeResize()) {
-			margins.setLeft(margins.left() - _marginsDelta.left());
-			margins.setRight(margins.right() - _marginsDelta.right());
-			margins.setBottom(margins.bottom() - _marginsDelta.bottom());
-			margins.setTop(margins.top() - _marginsDelta.top());
+			margins.setLeft(margins.left() - _rcWorkDelta.left());
+			margins.setRight(margins.right() - _rcWorkDelta.right());
+			margins.setBottom(margins.bottom() - _rcWorkDelta.bottom());
+			margins.setTop(margins.top() - _rcWorkDelta.top());
 		}
 	} else if (!_marginsDelta.isNull()) {
 		if (!nativeResize()) {
@@ -1022,8 +1025,8 @@ void WindowHelper::fixMaximizedWindow() {
 				0,
 				0,
 				0,
-				m.right - m.left - _marginsDelta.left() - _marginsDelta.right(),
-				m.bottom - m.top - _marginsDelta.top() - _marginsDelta.bottom(),
+				m.right - m.left - _rcWorkDelta.left() - _rcWorkDelta.right(),
+				m.bottom - m.top - _rcWorkDelta.top() - _rcWorkDelta.bottom(),
 				SWP_NOMOVE | SWP_NOSENDCHANGING | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREPOSITION);
 		}
 	}

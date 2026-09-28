@@ -30,12 +30,16 @@
 
 #include <QtCore/QtMath>
 #include <QtCore/QTextBoundaryFinder>
+#include <QtCore/QThread>
 #include <QtGui/QPainter>
 #include <QtGui/QPaintEngine>
 #include <QtGui/QBackingStore>
 #include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
+
+#include <atomic>
+#include <mutex>
 
 namespace Ui::Text {
 namespace {
@@ -378,14 +382,37 @@ void ReorderVisually(
 	return make();
 }
 
-// Put on the context, which copies them, so nothing of ours is kept: what the
-// desktop says can be said again, and then this is how the new answer arrives.
-void ApplySystemFontOptions(PangoContext *context) {
+struct PublishedFontOptions {
+	std::mutex mutex;
+	cairo_font_options_t *options = nullptr;
+	std::atomic<int> generation = 0;
+};
+
+[[nodiscard]] PublishedFontOptions &SystemFontOptions() {
+	static auto result = PublishedFontOptions();
+	return result;
+}
+
+void PublishSystemFontOptions() {
 	const auto options = MakeSystemFontOptions();
-	pango_cairo_context_set_font_options(context, options);
-	if (options) {
-		cairo_font_options_destroy(options);
+	auto &published = SystemFontOptions();
+	auto lock = std::unique_lock(published.mutex);
+	if (published.options) {
+		cairo_font_options_destroy(published.options);
 	}
+	published.options = options;
+	++published.generation;
+}
+
+// Polled, not pushed: a crl::async thread has no event loop to push to.
+void ApplySystemFontOptions(PangoContext *context, int &applied) {
+	auto &published = SystemFontOptions();
+	if (published.generation.load() == applied) {
+		return;
+	}
+	auto lock = std::unique_lock(published.mutex);
+	pango_cairo_context_set_font_options(context, published.options);
+	applied = published.generation.load();
 }
 
 // Everything drawn from a font is drawn differently now, and none of it is
@@ -399,8 +426,47 @@ void NotifyFontOptionsChanged() {
 	}
 }
 
-// Kept for the whole library: building it lists the fonts of the system once.
-//
+void WatchSystemFontOptions() {
+	static auto lifetime = std::optional<rpl::lifetime>();
+	if (lifetime) {
+		return;
+	}
+	lifetime.emplace();
+	PublishSystemFontOptions();
+#ifdef LIB_UI_PANGO_OVER_FONTCONFIG
+	Platform::FontSettingsChanges(
+	) | rpl::on_next([] {
+		PublishSystemFontOptions();
+		NotifyFontOptionsChanged();
+	}, *lifetime);
+#endif // LIB_UI_PANGO_OVER_FONTCONFIG
+}
+
+[[nodiscard]] bool OnMainThread() {
+	const auto application = QCoreApplication::instance();
+	return application
+		&& (QThread::currentThread() == application->thread());
+}
+
+struct Ring;
+
+// WHY: Pango keeps unguarded caches in a font map and in its fonts, and text
+// is drawn off the main thread too - theme previews, font samples - so every
+// thread gets a map, a context and a ring of its own, the way Qt does it.
+struct PerThread {
+	~PerThread();
+
+	PangoFontMap *fontMap = nullptr;
+	PangoContext *context = nullptr;
+	int applied = 0;
+	std::unique_ptr<Ring> ring;
+};
+
+[[nodiscard]] PerThread &ThisThread() {
+	thread_local auto result = PerThread();
+	return result;
+}
+
 // A map of our own, not the default one of cairo: that one is shared with
 // everything else in the process, and it lists the fonts the first time it is
 // asked anything - which GTK, brought in by the platform theme of Qt, does
@@ -412,8 +478,11 @@ void NotifyFontOptionsChanged() {
 // the pixels down: it rasterizes with the settings of the system, which is the
 // whole point of not going through the font engine of Qt.
 [[nodiscard]] PangoFontMap *FontMap() {
-	static const auto result = pango_cairo_font_map_new();
-	return result;
+	auto &local = ThisThread();
+	if (!local.fontMap) {
+		local.fontMap = pango_cairo_font_map_new();
+	}
+	return local.fontMap;
 }
 
 // Nothing is said here about rounding the positions of the glyphs to whole
@@ -427,20 +496,15 @@ void NotifyFontOptionsChanged() {
 // Saying it again is all a change of them takes: Pango marks the context as
 // changed and drops the fonts it made for the old answer.
 [[nodiscard]] PangoContext *Context() {
-	static const auto result = [] {
-		const auto context = pango_font_map_create_context(FontMap());
-		ApplySystemFontOptions(context);
-#ifdef LIB_UI_PANGO_OVER_FONTCONFIG
-		static auto lifetime = rpl::lifetime();
-		Platform::FontSettingsChanges(
-		) | rpl::on_next([=] {
-			ApplySystemFontOptions(context);
-			NotifyFontOptionsChanged();
-		}, lifetime);
-#endif // LIB_UI_PANGO_OVER_FONTCONFIG
-		return context;
-	}();
-	return result;
+	auto &local = ThisThread();
+	if (!local.context) {
+		local.context = pango_font_map_create_context(FontMap());
+		if (OnMainThread()) {
+			WatchSystemFontOptions();
+		}
+	}
+	ApplySystemFontOptions(local.context, local.applied);
+	return local.context;
 }
 
 // The pattern fontconfig matched for this font, which is what cairo rasterizes
@@ -469,87 +533,168 @@ void NotifyFontOptionsChanged() {
 }
 #endif // LIB_UI_PANGO_OVER_FONTCONFIG
 
-// Whether the glyphs of this font may sit at a fraction of a pixel, and their
-// advances keep one: hinting puts a stem on the grid, and text made of glyphs
-// that were fitted to it is counted in whole pixels too. Qt keeps the fraction
-// for light hinting and for none, and takes whole pixels otherwise - both in
-// supportsHorizontalSubPixelPositions() and in shouldUseDesignMetrics(), of
-// qfontengine_ft_p.h and qfontengine_ft.cpp - and the same is answered here,
-// so that a hinted font is laid out the same by either backend.
-//
-// The question is about the font that will rasterize the glyphs, so the font
-// itself is asked, and the two answers it has are put together the way cairo
-// puts them - _cairo_ft_options_merge() in cairo-ft-font.c. One is what the
-// font was loaded with, which is everything the context of ours was given; the
-// other is the pattern fontconfig matched, read the way cairo reads it in
-// _get_pattern_ft_options(). What the font was loaded with wins, except that a
-// pattern with the hinting turned off leaves the glyphs unhinted whatever else
-// says - the one rule of the merge that goes the other way. A pattern with no
-// style in it at all is hinted in full, which is what Qt does with a pattern it
-// can not read either.
+// WHY: a glyph keeps a fraction of a pixel only where cairo hints it lightly
+// or not at all (_cairo_ft_options_merge in cairo-ft-font.c), as Qt does - and
+// never without antialiasing, where a fraction changes the shape of the glyph.
 [[nodiscard]] bool SupportsSubpixelPositions(PangoFont *font) {
 #ifdef LIB_UI_PANGO_OVER_FONTCONFIG
 	const auto pattern = FontPattern(font);
-	auto hinting = FcTrue;
-	if (pattern
-		&& FcPatternGetBool(pattern, FC_HINTING, 0, &hinting) == FcResultMatch
-		&& !hinting) {
-		return true;
-	}
 	const auto scaled = PANGO_IS_CAIRO_FONT(font)
 		? pango_cairo_font_get_scaled_font(PANGO_CAIRO_FONT(font))
 		: nullptr;
+	const auto options = cairo_font_options_create();
+	const auto guard = gsl::finally([&] {
+		cairo_font_options_destroy(options);
+	});
 	if (scaled && cairo_scaled_font_status(scaled) == CAIRO_STATUS_SUCCESS) {
-		const auto options = cairo_font_options_create();
-		const auto guard = gsl::finally([&] {
-			cairo_font_options_destroy(options);
-		});
 		cairo_scaled_font_get_font_options(scaled, options);
-		switch (cairo_font_options_get_hint_style(options)) {
-		case CAIRO_HINT_STYLE_NONE:
-		case CAIRO_HINT_STYLE_SLIGHT:
-			return true;
-		case CAIRO_HINT_STYLE_MEDIUM:
-		case CAIRO_HINT_STYLE_FULL:
-			return false;
-		case CAIRO_HINT_STYLE_DEFAULT:
-			break; // Nothing was said, so the pattern is what is left.
-		}
 	}
-	if (!pattern) {
+	auto antialias = FcTrue;
+	if ((pattern
+			&& FcPatternGetBool(pattern, FC_ANTIALIAS, 0, &antialias)
+				== FcResultMatch
+			&& !antialias)
+		|| (cairo_font_options_get_antialias(options)
+			== CAIRO_ANTIALIAS_NONE)) {
 		return false;
 	}
+	auto hinting = FcTrue;
 	auto style = FC_HINT_FULL;
-	if (FcPatternGetInteger(pattern, FC_HINT_STYLE, 0, &style)
-		!= FcResultMatch) {
+	if (pattern
+		&& FcPatternGetInteger(pattern, FC_HINT_STYLE, 0, &style)
+			!= FcResultMatch) {
 		style = FC_HINT_FULL;
 	}
-	return (style == FC_HINT_NONE) || (style == FC_HINT_SLIGHT);
+	if ((style == FC_HINT_NONE)
+		|| (pattern
+			&& FcPatternGetBool(pattern, FC_HINTING, 0, &hinting)
+				== FcResultMatch
+			&& !hinting)) {
+		return true;
+	}
+	switch (cairo_font_options_get_hint_style(options)) {
+	case CAIRO_HINT_STYLE_NONE:
+	case CAIRO_HINT_STYLE_SLIGHT:
+		return true;
+	case CAIRO_HINT_STYLE_MEDIUM:
+	case CAIRO_HINT_STYLE_FULL:
+		return false;
+	case CAIRO_HINT_STYLE_DEFAULT:
+		break; // Nothing was said, so the pattern is what is left.
+	}
+	return (style == FC_HINT_SLIGHT);
 #else // LIB_UI_PANGO_OVER_FONTCONFIG
 	return false;
 #endif // !LIB_UI_PANGO_OVER_FONTCONFIG
 }
 
-// Shaped the way the layout of Pango shapes it: the geometry of the glyphs of
-// a font that was fitted to whole pixels is put on whole pixels as well, and
-// the glyphs of one that was not keep their fractions. Without this the glyphs
-// of a hinted font come out on whole pixels anyway, because cairo rounds where
-// it puts them, while the step to the next one keeps a fraction - and the gaps
-// between the letters jump by a pixel.
-//
-// Saying so appeared in 1.44. That may be later than the headers this was
-// built against while the library that ends up loaded is newer, as it is
-// wherever Pango comes from the system - so when the headers are too old the
-// loader is asked instead. Where even that is not available, an older Pango
-// shapes the way it always did.
-void Shape(
+// What fitting a glyph to the grid adds to its width, the same on every use.
+struct FittingWidths {
+	cairo_scaled_font_t *designed = nullptr;
+	base::flat_map<PangoGlyph, double> added;
+};
+
+// WHY: the same font with nothing fitted, to keep what the shaping added of its
+// own - kept on the fitted one, so that an item pays for making it only once.
+[[nodiscard]] FittingWidths *FittingWidthsOf(cairo_scaled_font_t *fitted) {
+	static const auto key = cairo_user_data_key_t();
+	const auto already = cairo_scaled_font_get_user_data(fitted, &key);
+	if (already) {
+		return static_cast<FittingWidths*>(already);
+	}
+	auto matrix = cairo_matrix_t();
+	auto ctm = cairo_matrix_t();
+	cairo_scaled_font_get_font_matrix(fitted, &matrix);
+	cairo_scaled_font_get_ctm(fitted, &ctm);
+	const auto options = cairo_font_options_create();
+	const auto guard = gsl::finally([&] {
+		cairo_font_options_destroy(options);
+	});
+	cairo_scaled_font_get_font_options(fitted, options);
+	cairo_font_options_set_hint_metrics(options, CAIRO_HINT_METRICS_OFF);
+	const auto designed = cairo_scaled_font_create(
+		cairo_scaled_font_get_font_face(fitted),
+		&matrix,
+		&ctm,
+		options);
+	if (cairo_scaled_font_status(designed) != CAIRO_STATUS_SUCCESS) {
+		cairo_scaled_font_destroy(designed);
+		return nullptr;
+	}
+	const auto result = new FittingWidths{ .designed = designed };
+	const auto destroy = [](void *data) {
+		const auto widths = static_cast<FittingWidths*>(data);
+		cairo_scaled_font_destroy(widths->designed);
+		delete widths;
+	};
+	if (cairo_scaled_font_set_user_data(fitted, &key, result, destroy)
+		!= CAIRO_STATUS_SUCCESS) {
+		destroy(result);
+		return nullptr;
+	}
+	return result;
+}
+
+// WHY: since 1.44 Pango measures a glyph by the tables of the font, so one
+// fitted to the pixel grid still gets the step of the unfitted outline - and
+// hinted letters come out tighter than the ink drawn for them (GNOME/pango#404).
+[[nodiscard]] bool FitAdvancesToHinting(
+		const PangoAnalysis *analysis,
+		PangoGlyphString *glyphs) {
+	const auto font = analysis->font;
+	if (!PANGO_IS_CAIRO_FONT(font)) {
+		return false;
+	}
+	const auto fitted = pango_cairo_font_get_scaled_font(
+		PANGO_CAIRO_FONT(font));
+	if (!fitted || cairo_scaled_font_status(fitted) != CAIRO_STATUS_SUCCESS) {
+		return false;
+	}
+	// Cairo hands every thread the same scaled font, and these hang on it.
+	static auto mutex = std::mutex();
+	auto lock = std::unique_lock(mutex);
+	const auto widths = FittingWidthsOf(fitted);
+	if (!widths) {
+		return false;
+	}
+	for (auto i = 0; i != glyphs->num_glyphs; ++i) {
+		auto &geometry = glyphs->glyphs[i].geometry;
+		const auto index = glyphs->glyphs[i].glyph;
+		auto j = widths->added.find(index);
+		if (j == end(widths->added)) {
+			const auto glyph = cairo_glyph_t{ .index = index };
+			auto fittedExtents = cairo_text_extents_t();
+			auto designedExtents = cairo_text_extents_t();
+			cairo_scaled_font_glyph_extents(fitted, &glyph, 1, &fittedExtents);
+			cairo_scaled_font_glyph_extents(
+				widths->designed,
+				&glyph,
+				1,
+				&designedExtents);
+			j = widths->added.emplace(
+				index,
+				fittedExtents.x_advance - designedExtents.x_advance).first;
+		}
+		const auto shaped = geometry.width / double(PANGO_SCALE);
+		const auto width = shaped + j->second;
+		geometry.width = int(std::round(width)) * PANGO_SCALE;
+		geometry.x_offset = PANGO_UNITS_ROUND(geometry.x_offset);
+		geometry.y_offset = PANGO_UNITS_ROUND(geometry.y_offset);
+	}
+	return true;
+}
+
+// WHY: saying whether to round appeared in 1.44, and the headers this was built
+// against can be older than the library that ends up loaded - so the loader is
+// asked instead, and an older Pango is left to shape the way it always did.
+void ShapeItem(
 		const char *itemText,
 		int itemLength,
 		const char *paragraphText,
 		int paragraphLength,
 		const PangoAnalysis *analysis,
-		PangoGlyphString *glyphs) {
-	const auto rounds = !SupportsSubpixelPositions(analysis->font);
+		PangoGlyphString *glyphs,
+		bool rounds) {
 #if PANGO_VERSION_CHECK(1, 44, 0)
 	pango_shape_with_flags(
 		itemText,
@@ -591,6 +736,43 @@ void Shape(
 		analysis,
 		glyphs);
 #endif // Pango < 1.44.0
+}
+
+void Shape(
+		const char *itemText,
+		int itemLength,
+		const char *paragraphText,
+		int paragraphLength,
+		const PangoAnalysis *analysis,
+		PangoGlyphString *glyphs) {
+	// WHY: a glyph is rasterized per quarter of a pixel only since cairo 1.17.4
+	// (PHASE in cairo-image-compositor.c), and an older one snaps it to a whole
+	// pixel instead - where a fraction kept in the advances makes the gaps jump.
+	const auto fits = !SupportsSubpixelPositions(analysis->font);
+	const auto rounds = !fits
+		&& (cairo_version() < CAIRO_VERSION_ENCODE(1, 17, 4));
+	ShapeItem(
+		itemText,
+		itemLength,
+		paragraphText,
+		paragraphLength,
+		analysis,
+		glyphs,
+		rounds);
+
+	// An older Pango has no flags and fits the advances itself, as we do here.
+	if (!fits || pango_version() < PANGO_VERSION_ENCODE(1, 44, 0)) {
+		return;
+	} else if (!FitAdvancesToHinting(analysis, glyphs)) {
+		ShapeItem(
+			itemText,
+			itemLength,
+			paragraphText,
+			paragraphLength,
+			analysis,
+			glyphs,
+			true);
+	}
 }
 
 // The glyphs of a shaped item, drawn the way the font itself was loaded where
@@ -646,7 +828,9 @@ void ShowGlyphs(
 
 	// Glyphs that go into an image of ours can not keep subpixel antialiasing:
 	// what lies under them there is not the screen - see the notes there.
-	if (!subpixelAllowed) {
+	if (!subpixelAllowed
+		&& (cairo_font_options_get_antialias(options)
+			!= CAIRO_ANTIALIAS_NONE)) {
 		cairo_font_options_set_antialias(options, CAIRO_ANTIALIAS_GRAY);
 		cairo_font_options_set_subpixel_order(
 			options,
@@ -970,11 +1154,31 @@ struct Resolved {
 // Four of them, and for a while more than four: a paragraph that is being
 // read from cannot be written over, so when every slot is busy the ring grows
 // rather than take one away - and gives the room back as soon as it can.
-std::vector<Resolved> Kept(kKeptParagraphs);
-int KeptNext/* = 0*/;
+struct Ring {
+	std::vector<Resolved> kept = std::vector<Resolved>(kKeptParagraphs);
+	int next = 0;
+};
+
+PerThread::~PerThread() {
+	ring = nullptr;
+	if (context) {
+		g_object_unref(context);
+	}
+	if (fontMap) {
+		g_object_unref(fontMap);
+	}
+}
+
+[[nodiscard]] Ring &KeptRing() {
+	auto &local = ThisThread();
+	if (!local.ring) {
+		local.ring = std::make_unique<Ring>();
+	}
+	return *local.ring;
+}
 
 [[nodiscard]] Itemized *KeptFor(const ResolvedKey &key) {
-	for (const auto &entry : Kept) {
+	for (const auto &entry : KeptRing().kept) {
 		if (entry.itemized && entry.key == key) {
 			return entry.itemized.get();
 		}
@@ -988,35 +1192,38 @@ int KeptNext/* = 0*/;
 [[nodiscard]] Itemized *Keep(
 		const ResolvedKey &key,
 		std::unique_ptr<Itemized> itemized) {
+	auto &kept = KeptRing().kept;
+	auto &next = KeptRing().next;
+
 	// First the room the ring took while everything was being read from,
 	// given back now that something may not be.
-	for (auto i = int(Kept.size()); i > kKeptParagraphs;) {
+	for (auto i = int(kept.size()); i > kKeptParagraphs;) {
 		--i;
-		if (!Kept[i].itemized || !Kept[i].itemized->borrowers) {
-			Kept.erase(begin(Kept) + i);
-			if (KeptNext > i) {
-				--KeptNext;
+		if (!kept[i].itemized || !kept[i].itemized->borrowers) {
+			kept.erase(begin(kept) + i);
+			if (next > i) {
+				--next;
 			}
 		}
 	}
-	if (KeptNext >= int(Kept.size())) {
-		KeptNext = 0;
+	if (next >= int(kept.size())) {
+		next = 0;
 	}
 
 	const auto result = itemized.get();
-	const auto count = int(Kept.size());
+	const auto count = int(kept.size());
 	for (auto i = 0; i != count; ++i) {
-		const auto at = (KeptNext + i) % count;
-		if (Kept[at].itemized && Kept[at].itemized->borrowers) {
+		const auto at = (next + i) % count;
+		if (kept[at].itemized && kept[at].itemized->borrowers) {
 			continue;
 		}
-		Kept[at] = { key, std::move(itemized) };
-		KeptNext = (at + 1) % count;
+		kept[at] = { key, std::move(itemized) };
+		next = (at + 1) % count;
 		return result;
 	}
 
 	// Everything is being read from, so the ring holds one more for now.
-	Kept.push_back({ key, std::move(itemized) });
+	kept.push_back({ key, std::move(itemized) });
 	return result;
 }
 

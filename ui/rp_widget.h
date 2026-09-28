@@ -459,12 +459,30 @@ public:
 	void accessibilityChildValueChanged(int index);
 	[[nodiscard]] virtual QAccessible::State accessibilityChildState(int index) const;
 	void accessibilityChildStateChanged(int index, AccessibilityState changes);
+	// Replaces the selected-state notification after the owner updates its state.
+	void accessibilityChildSelectionChanged(int index);
 	[[nodiscard]] virtual QAccessible::Role accessibilityChildRole() const;
+
+	// The role of one child where it differs from the list-wide one above:
+	// a divider row between the items of a list is a Separator, not one
+	// more item. Defaults to accessibilityChildRole().
+	[[nodiscard]] virtual QAccessible::Role accessibilityChildRoleAt(
+		int index) const;
+
 	[[nodiscard]] virtual QRect accessibilityChildRect(int index) const;
 	[[nodiscard]] virtual int accessibilityChildColumnCount(int row) const;
 	[[nodiscard]] virtual QAccessible::Role accessibilityChildSubItemRole() const;
 	[[nodiscard]] virtual QString accessibilityChildSubItemName(int row, int column) const;
 	[[nodiscard]] virtual QString accessibilityChildSubItemValue(int row, int column) const;
+
+	// Announces a child as the one holding accessible focus. Meant for a
+	// browse position that moves while keyboard focus stays put - arrow keys
+	// inside a painted list, say. Taking keyboard focus needs no call: that
+	// raises a focus event of its own which the platform resolves through
+	// focusChild(), so announcing the child here as well reads it twice; make
+	// sure focusChild() points at the right one before focus-in returns
+	// instead. (On Windows that resolution needs Qt 6.2 or the focus child
+	// notification backported into the 5.15 build.)
 	void accessibilityChildFocused(int index);
 
 	// Per-child opt-in for the accessibility action interface (SetFocus /
@@ -491,6 +509,12 @@ public:
 	// on a replacement row.
 	virtual void accessibilityChildSetFocus(quintptr identity);
 	virtual void accessibilityChildActivate(quintptr identity);
+
+	// The showMenu action of a child that reports itself expandable: the
+	// assistive technology expands it with it when collapsed, and
+	// collapses it when expanded - a picker of variants opened over an
+	// item, say. Advertised only with the expandable state.
+	virtual void accessibilityChildShowMenu(quintptr identity);
 
 	// Keep this widget's Tab-focusable children ordered in the focus chain
 	// by visual position (row bands top-to-bottom, left-to-right within a

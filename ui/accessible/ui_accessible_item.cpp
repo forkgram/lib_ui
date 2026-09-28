@@ -91,7 +91,10 @@ QWindow *Item::window() const {
 
 QAccessible::Role Item::role() const {
 	const auto parent = _parent.get();
-	return parent
+	const auto index = parent ? currentIndex() : -1;
+	return (index >= 0)
+		? parent->accessibilityChildRoleAt(index)
+		: parent
 		? parent->accessibilityChildRole()
 		: QAccessible::Role();
 }
@@ -233,6 +236,11 @@ QStringList Item::actionNames() const {
 	if (childState.selectable) {
 		names.append(QAccessibleActionInterface::toggleAction());
 	}
+	// An expandable item opens something of its own: the Windows bridge
+	// expands and collapses it through the showMenu action.
+	if (childState.expandable) {
+		names.append(QAccessibleActionInterface::showMenuAction());
+	}
 	return names;
 }
 
@@ -253,6 +261,8 @@ void Item::doAction(const QString &actionName) {
 		parent->accessibilityChildSetFocus(identity);
 	} else if (actionName == QAccessibleActionInterface::pressAction()) {
 		parent->accessibilityChildActivate(identity);
+	} else if (actionName == QAccessibleActionInterface::showMenuAction()) {
+		parent->accessibilityChildShowMenu(identity);
 	}
 }
 

@@ -85,7 +85,7 @@ private:
 	rpl::event_stream<not_null<SystemCommandRequest*>> _systemCommandRequests;
 	std::optional<WindowShadow> _shadow;
 	rpl::variable<uint> _dpi;
-	QMargins _marginsDelta;
+	QMargins _marginsDelta, _rcWorkDelta;
 	HWND _handle = nullptr;
 	bool _updatingMargins = false;
 	bool _isFullScreen = false;

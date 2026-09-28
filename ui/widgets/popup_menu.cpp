@@ -23,11 +23,11 @@
 #include "ui/ui_utility.h"
 
 #include <QtGui/QtEvents>
+#include <QtGui/QCursor>
 #include <QtGui/QPainter>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
-#include <qpa/qplatformwindow.h>
 #include <qpa/qplatformwindow_p.h>
 
 namespace Ui {
@@ -1049,29 +1049,27 @@ bool PopupMenu::prepareGeometryFor(
 	using namespace QNativeInterface::Private;
 	if (const auto native
 			= windowHandle()->nativeInterface<QWaylandWindow>()) {
-		const auto dpr = windowHandle()->devicePixelRatio()
-			/ windowHandle()->handle()->devicePixelRatio();
 		const auto padding = _additionalMenuPadding - _additionalMenuMargins;
 		base::take(r);
 		if (_parent) {
 			// we must have an action to position the submenu around
 			Assert(parentActionWidget != nullptr);
-			const auto rect = QRect(
-				parentActionWidget->mapTo(
-					parentActionWidget->window(),
-					QPoint()),
-				parentActionWidget->size()) + _st.scrollPadding;
 			native->setParentControlGeometry(
-				QRect(rect.topLeft() * dpr, rect.size() * dpr));
+				QRect(
+					parentActionWidget->mapTo(
+						parentActionWidget->window(),
+						QPoint()),
+					parentActionWidget->size())
+				+ _st.scrollPadding);
 		} else if (padding.top()) {
 			// provide the compositor with a range for flip_y so it uses
 			// the cursor point instead of the padding's top point
 			native->setParentControlGeometry(
 				QRect(
-					(p
+					p
 						- parentWidget()->window()->pos()
-						- QPoint(padding.left(), padding.top())) * dpr,
-					QSize(1, int(base::SafeRound(padding.top() * dpr)))));
+						- QPoint(padding.left(), padding.top()),
+					QSize(1, padding.top())));
 			windowHandle()->setProperty(
 				"_q_waylandPopupAnchor",
 				QVariant::fromValue(Qt::TopEdge | Qt::LeftEdge));
@@ -1154,7 +1152,9 @@ void PopupMenu::showPrepared(TriggeredSource source) {
 	}
 	Platform::ShowOverAll(this);
 	raise();
-	activateWindow();
+	if (!_parent) {
+		activateWindow();
+	}
 	if (Ui::ScreenReaderModeActive()) {
 		_menu->setShowSource(TriggeredSource::Keyboard);
 	} else {
@@ -1508,6 +1508,21 @@ PopupMenu::~PopupMenu() {
 	if (_destroyedCallback) {
 		_destroyedCallback();
 	}
+}
+
+QPoint ContextMenuPosition(
+		not_null<QWidget*> anchor,
+		not_null<QContextMenuEvent*> e) {
+	return ContextMenuPosition(anchor, e, anchor->rect());
+}
+
+QPoint ContextMenuPosition(
+		not_null<QWidget*> anchor,
+		not_null<QContextMenuEvent*> e,
+		QRect rect) {
+	return (e->reason() == QContextMenuEvent::Keyboard)
+		? anchor->mapToGlobal(rect.center())
+		: QCursor::pos();
 }
 
 } // namespace Ui
