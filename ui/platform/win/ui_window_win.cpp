@@ -552,7 +552,9 @@ bool WindowHelper::filterNativeEvent(
 		if (window()->isFullScreen()) {
 			// Whole window is client, and Qt must not apply custom
 			// margins of normal state (they stay set in full screen).
-			if (result) *result = 0;
+			if (result) {
+				*result = 0;
+			}
 			return true;
 		}
 		const auto r = &((LPNCCALCSIZE_PARAMS)lParam)->rgrc[0];
@@ -980,7 +982,7 @@ void WindowHelper::updateMargins() {
 			margins.setBottom(margins.bottom() - _rcWorkDelta.bottom());
 			margins.setTop(margins.top() - _rcWorkDelta.top());
 		}
-	} else if (!_marginsDelta.isNull()) {
+	} else if (!_isFullScreen && !_marginsDelta.isNull()) {
 		if (!nativeResize()) {
 			RECT w;
 			GetWindowRect(_handle, &w);

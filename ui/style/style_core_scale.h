@@ -30,6 +30,7 @@ void SetScale(int scale);
 
 [[nodiscard]] int MaxScaleForRatio(int ratio);
 [[nodiscard]] int CheckScale(int scale);
+[[nodiscard]] int BaseDpi();
 
 [[nodiscard]] bool SquareUserpics();
 void SetSquareUserpics(bool value);
