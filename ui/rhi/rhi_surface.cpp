@@ -176,6 +176,9 @@ void SurfaceRhi::removeExStyleFilterWin() {
 #endif // Q_OS_WIN
 
 void SurfaceRhi::initialize(QRhiCommandBuffer *cb) {
+	if (!cb || !rhi() || rhi()->isDeviceLost() || !renderTarget()) {
+		return;
+	}
 #ifdef Q_OS_WIN
 	installExStyleFilterWin();
 #endif // Q_OS_WIN
@@ -193,7 +196,12 @@ void SurfaceRhi::initialize(QRhiCommandBuffer *cb) {
 }
 
 void SurfaceRhi::render(QRhiCommandBuffer *cb) {
-	if (!updatesEnabled() || size().isEmpty()) {
+	if (!updatesEnabled()
+		|| size().isEmpty()
+		|| !cb
+		|| !rhi()
+		|| rhi()->isDeviceLost()
+		|| !renderTarget()) {
 		return;
 	}
 	if (const auto r = rhiRenderer()) {
