@@ -196,6 +196,9 @@ dialogsUnreadBgMuted: #bbbbbb; // chat list unread badge background for muted ch
 dialogsUnreadFg: windowFgActive; // chat list unread badge text
 dialogsArchiveFg: #525252 | dialogsNameFg; // chat list archive name text
 dialogsOnlineBadgeFg: #4dc920 | dialogsUnreadBg; // chat list online status
+dialogsLastSeenBadgeRecent: #eaea1e; // chat list last seen under 15 minutes
+dialogsLastSeenBadgeModerate: #ea841e; // chat list last seen under 30 minutes
+dialogsLastSeenBadgeStale: #ea1e1e; // chat list last seen under 60 minutes
 dialogsScamFg: dialogsDraftFg; // chat list scam label
 
 dialogsBgOver: windowBgOver; // chat list background with mouse over
