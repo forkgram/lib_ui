@@ -40,7 +40,7 @@ void ApplyRhiApi(QRhiWidget *widget) {
 		widget->setApi(QRhiWidget::Api::Vulkan);
 		return;
 	}
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	if (!::Platform::MetalSupported()) {
 		widget->setApi(QRhiWidget::Api::OpenGL);
 	}
@@ -272,7 +272,6 @@ void LogWindowRhi(const char *tag, not_null<QWidget*> widget) {
 		switch (handle->surfaceType()) {
 		case QSurface::RasterSurface: return u"Raster"_q;
 		case QSurface::OpenGLSurface: return u"OpenGL"_q;
-		case QSurface::RasterGLSurface: return u"RasterGL"_q;
 		case QSurface::VulkanSurface: return u"Vulkan"_q;
 		case QSurface::MetalSurface: return u"Metal"_q;
 		case QSurface::Direct3DSurface: return u"Direct3D"_q;

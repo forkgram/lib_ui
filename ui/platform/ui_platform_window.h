@@ -10,6 +10,8 @@
 #include "base/object_ptr.h"
 #include "ui/round_rect.h"
 
+class QScreen;
+
 namespace style {
 struct WindowTitle;
 struct TextStyle;
@@ -42,6 +44,10 @@ public:
 	[[nodiscard]] virtual not_null<RpWidget*> body();
 	[[nodiscard]] virtual RpWidget *titleWidget();
 	[[nodiscard]] virtual QMargins frameMargins();
+	[[nodiscard]] virtual QRect fitFrameInWorkArea(
+		QRect body,
+		QRect space,
+		not_null<const QScreen*> screen) const;
 	[[nodiscard]] virtual int additionalContentPadding() const;
 	[[nodiscard]] virtual auto additionalContentPaddingValue() const
 		-> rpl::producer<int>;
@@ -109,6 +115,10 @@ public:
 	not_null<RpWidget*> body() override;
 	RpWidget *titleWidget() override;
 	QMargins frameMargins() override;
+	QRect fitFrameInWorkArea(
+		QRect body,
+		QRect space,
+		not_null<const QScreen*> screen) const override;
 	void setTitle(const QString &title) override;
 	void setTitleStyle(const style::WindowTitle &st) override;
 	void setNativeFrame(bool enabled) override;
@@ -125,6 +135,7 @@ private:
 	void updateRoundingOverlay();
 	[[nodiscard]] bool hasShadow() const;
 	[[nodiscard]] QMargins resizeArea() const;
+	[[nodiscard]] QMargins normalResizeArea() const;
 	[[nodiscard]] Qt::Edges edgesFromPos(const QPoint &pos) const;
 	void paintBorders(QPainter &p);
 	void updateWindowMargins();
